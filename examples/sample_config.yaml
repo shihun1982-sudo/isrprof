@@ -1,0 +1,223 @@
+# isrprof configuration - sample 5G NR modem (3 cores)
+# All time expressions accept: "1.2 symbol" | "0.5 slot" | "-30 us" | "2 ms" | "1 subframe"
+# (bare numbers are symbols).  Offsets are relative to NW timing unless stated otherwise.
+
+project:
+  name: "Sample NR L1 modem (mu=1, 30 kHz SCS)"
+  sources:
+    - "sample_modem/**/*.c"
+    - "sample_modem/**/*.h"
+
+parser:
+  backend: builtin            # builtin | libclang (plug-in)
+  ignore_calls: [sizeof, memcpy, memset, ASSERT]
+
+numerology:
+  mu: 1                       # 30 kHz -> slot = 500 us, symbol ~= 35.7 us
+  symbols_per_slot: 14
+  # symbol_us: 35.71          # override when exact CP handling matters
+
+# ---------------------------------------------------------------- top level: cores
+cores:
+  - id: 0
+    name: "Core0 L1C (control)"
+    clock_mhz: 800
+    modules:
+      - { name: l1c_timer, files: ["sample_modem/l1c/nw_timer.c"] }
+      - { name: l1c_sched, files: ["sample_modem/l1c/sched.c", "sample_modem/l1c/sched.h"] }
+      - { name: common,    files: ["sample_modem/common/*"] }
+  - id: 1
+    name: "Core1 DL PHY"
+    clock_mhz: 1200
+    modules:
+      - { name: dl_isr, files: ["sample_modem/dl/dl_isr.c"] }
+      - { name: dl_drv, files: ["sample_modem/dl/dl_drv.c", "sample_modem/dl/dl_drv.h"] }
+  - id: 2
+    name: "Core2 UL PHY"
+    clock_mhz: 1200
+    modules:
+      - { name: ul_isr, files: ["sample_modem/ul/ul_isr.c"] }
+      - { name: ul_drv, files: ["sample_modem/ul/ul_drv.c", "sample_modem/ul/ul_drv.h"] }
+
+# ---------------------------------------------------------------- x axis: timing items
+timing_items:
+  - { id: nw,        name: "NW timing",        offset: "0 symbol",    priority: 0,
+      description: "gNB frame timing as seen by the UE" }
+  - { id: slot_tick, name: "Slot tick",        offset: "-1 symbol",   priority: 1,
+      description: "pre-slot scheduling tick on L1C" }
+  - { id: dl,        name: "DL timing",        offset: "-0.3 symbol", priority: 2,
+      description: "DL symbol timing (NW - propagation/FFT window shift)" }
+  - { id: dl_hi,     name: "DL timing (hi-prio)", offset: "-0.3 symbol", priority: 3,
+      description: "same timebase as DL, higher interrupt priority" }
+  - { id: ul,        name: "UL timing (TA)",   offset: "+2 symbol",   priority: 4,
+      description: "UL transmit timing = NW + timing advance" }
+  # HW lines: HW blocks draw their control timing / deadlines on these (kind: hw)
+  - { id: hw_rx,     name: "HW RX line",       offset: "-0.45 symbol", kind: hw,
+      description: "RX datapath timing (FFT window start) = DL timing - pipeline latency" }
+  - { id: hw_tx,     name: "HW TX line",       offset: "+1.8 symbol",  kind: hw,
+      description: "TX datapath timing (DAC) = UL timing - analog delay" }
+  - { id: hw_ctrl,   name: "HW control line",  offset: "0 symbol",     kind: hw }
+
+# ---------------------------------------------------------------- y axis: ISR placement
+# start is relative to the lane's own timebase; length is the measured/budgeted envelope.
+isrs:
+  - { name: SLOT_TICK_ISR, core: 0, timing: slot_tick, entry: slot_tick_isr,
+      start: "0 symbol", length: "0.8 symbol", period: "1 slot", priority: 2 }
+  - { name: DL_SYMBOL_ISR, core: 1, timing: dl, entry: dl_symbol_isr,
+      start: "0 symbol", length: "0.6 symbol", period: "1 symbol", priority: 3 }
+  - { name: DL_SLOT_ISR,   core: 1, timing: dl_hi, entry: dl_slot_isr,
+      start: "1 symbol", length: "2.5 symbol", period: "1 slot", priority: 5,
+      description: "PDCCH decode -> LDPC -> HARQ report" }
+  - { name: UL_SYMBOL_ISR, core: 2, timing: ul, entry: ul_symbol_isr,
+      start: "0 symbol", length: "0.7 symbol", period: "1 symbol", priority: 3 }
+  - { name: UL_TX_PREP_ISR, core: 2, timing: ul, entry: ul_tx_prep_isr,
+      start: "4 symbol", length: "1.5 symbol", period: "1 slot", priority: 4 }
+
+# ---------------------------------------------------------------- HW block diagram + deadlines
+hw:
+  macros:
+    read:  [HW_RD]
+    write: [HW_WR]
+    rmw:   [HW_RMW]
+    block_arg: 0              # HW_WR(<block>, <reg>, val)
+    reg_arg: 1
+    auto_detect_volatile: true
+  default_line: hw_ctrl       # HW line used by blocks that do not name one
+  blocks:
+    # line: the HW timing line the block's control timing (grid, deadlines) is drawn on.
+    # deadline: { timing?, at, period?, note?, cores?, isrs? }
+    #   - `at` is in the frame of `timing` (defaults to the block line); with `period` it recurs
+    #     (the access must land before `at` inside every period); `cores` / `isrs` restrict clients.
+    - { id: TIMER, name: "NW timer",      base: 0x40050000, group: control, pos: [0, 0], line: hw_ctrl,
+        regs: [SFN, SLOT, SYM, CMP0] }
+    - { id: FFT,   name: "FFT engine",    base: 0x40010000, group: dl, pos: [1, 0], line: hw_rx,
+        regs: [CTRL, SIZE, START, STATUS],
+        deadline: { at: "0.65 symbol", period: "1 symbol",
+                    note: "config must land before the FFT window opens (HW RX line)" } }
+    - { id: CHEST, name: "Channel est.",  base: 0x40060000, group: dl, pos: [2, 0], line: hw_rx,
+        regs: [CTRL, START, STATUS],
+        deadline: { at: "1.05 symbol", period: "1 symbol" } }
+    - id: LDPC
+      name: "LDPC dec/enc"
+      base: 0x40020000
+      group: shared
+      pos: [1, 1]
+      line: hw_rx
+      regs: [CTRL, BG, START, STATUS, ITER]
+      deadlines:                     # shared block: one deadline per client core
+        - { timing: dl, at: "3.0 symbol", period: "1 slot", cores: [1],
+            note: "decoder must start by DL sym 3 to meet HARQ-ACK" }
+        - { timing: ul, at: "5.0 symbol", period: "1 slot", cores: [2],
+            note: "encoder must start by UL sym 5 for PUSCH" }
+    - { id: DMA,   name: "Soft-bit DMA",  base: 0x40030000, group: shared, pos: [2, 1], line: hw_ctrl,
+        regs: [SRC, DST, LEN, CTRL, STATUS] }
+    - { id: IFFT,  name: "IFFT engine",   base: 0x40070000, group: ul, pos: [3, 1], line: hw_tx,
+        regs: [CTRL, START],
+        deadline: { at: "5.4 symbol", period: "1 slot" } }
+    - { id: RF,    name: "RF front-end",  base: 0x40040000, group: ul, pos: [3, 0], line: hw_tx,
+        regs: [TA, TX_GATE, GAIN],
+        deadline: { at: "0.7 symbol", period: "1 symbol",
+                    note: "TA / TX gate before each symbol on the HW TX line" } }
+
+# ---------------------------------------------------------------- memory / IPC
+memory:
+  heap_functions: [malloc, calloc, pool_alloc, pool_free]
+  ipc:
+    macros: [IPC_SEND, IPC_RECV]
+    channel_arg: 0
+    channels:
+      - { id: CH_L1C_TO_DL, from: 0, to: 1 }
+      - { id: CH_L1C_TO_UL, from: 0, to: 2 }
+      - { id: CH_DL_TO_L1C, from: 1, to: 0 }
+  ignore_vars: []
+
+# ---------------------------------------------------------------- Structure101-style rules
+architecture:
+  layers:                       # top -> bottom; calls must go downward
+    - { name: ISR,       functions: ["*_isr"] }
+    - { name: Scheduler, functions: ["l1c_*", "sched_*", "dl_pdcch_*", "dl_ldpc_*", "dl_harq_*", "ul_pusch_*", "ul_fetch_*"] }
+    - { name: Service,   functions: ["dl_*", "ul_*", "nw_timer_*", "ipc_*", "pool_*"] }
+    - { name: Driver,    functions: ["drv_*"] }
+    - { name: HAL,       functions: ["hal_*"] }
+  rules:
+    - { name: "no heap from ISR code", deny: { from: "dl_*", to: "pool_alloc" } }
+  fat_threshold: 6              # module internal dependency count above which it is "overweight"
+  allow_skip_layer: true
+  include_unreached: false      # only functions reachable from ISRs
+
+# ---------------------------------------------------------------- cost model (self time per function)
+cost_model:
+  source_priority: [trace, config, llm, default]
+  # trace_file: traces/isr_costs.csv        # columns: function,us   (or function,cycles,clock_mhz)
+  default_cost: "0.02 symbol"
+  external_cost: "0.01 symbol"
+  function_costs:
+    slot_tick_isr: "0.05 symbol"
+    nw_timer_latch: "0.08 symbol"
+    l1c_schedule_slot: "0.05 symbol"
+    sched_build_dl_grant: "0.12 symbol"
+    sched_build_ul_grant: "0.10 symbol"
+    sched_commit: "0.06 symbol"
+    ipc_post: "0.04 symbol"
+    nw_timer_arm_next: "0.05 symbol"
+    dl_symbol_isr: "0.04 symbol"
+    dl_track_symbol: "0.03 symbol"
+    dl_fft_kick: "0.03 symbol"
+    drv_fft_configure: "0.10 symbol"
+    drv_fft_start: "0.03 symbol"
+    dl_chest_run: "0.06 symbol"
+    drv_chest_start: "0.05 symbol"
+    dl_slot_isr: "0.05 symbol"
+    dl_pdcch_decode: "0.90 symbol"
+    ipc_fetch: "0.05 symbol"
+    dl_ldpc_schedule: "0.10 symbol"
+    dl_harq_buffer: "0.05 symbol"
+    pool_alloc: "0.20 symbol"
+    drv_ldpc_start: "0.12 symbol"
+    drv_dma_start: "0.25 symbol"
+    dl_dma_done_cb: "0.02 symbol"
+    hal_ldpc_wait: "0.40 symbol"
+    drv_ldpc_poll: "0.03 symbol"
+    dl_harq_report: "0.08 symbol"
+    ul_symbol_isr: "0.04 symbol"
+    ul_ta_apply: "0.03 symbol"
+    drv_rf_apply_ta: "0.06 symbol"
+    drv_rf_tx_gate: "0.05 symbol"
+    ul_tx_prep_isr: "0.05 symbol"
+    ul_fetch_grant: "0.04 symbol"
+    ul_pusch_encode: "0.30 symbol"
+    drv_ldpc_encode: "0.15 symbol"
+    drv_ifft_start: "0.06 symbol"
+
+# ---------------------------------------------------------------- optional LLM assistance
+llm:
+  enabled: false                 # set true + export ANTHROPIC_API_KEY (or `ant auth login`)
+  provider: anthropic            # official SDK: pip install anthropic
+  model: claude-opus-5-5
+  effort: medium                 # low | medium | high | xhigh | max
+  api_key_env: ANTHROPIC_API_KEY
+  # base_url: https://api.anthropic.com
+  max_tokens: 4096
+  cache_file: .isrprof_llm_cache.json
+  # system_prompt: "..."         # override the default system prompt
+  tasks:
+    estimate_costs:              # WCET estimate for functions lacking trace/config cost
+      enabled: true
+      reg_access_cycles: 40
+      # prompt: custom prompt with {core_name} {clock_mhz} {reg_cycles} {functions_block}
+    classify_hw_macro:           # decide read/write/block-arg for unknown register macros
+      enabled: true
+    summarize:                   # one-line function summaries for tooltips
+      enabled: false
+    suggest_layers:              # propose a layer for functions matching no layer pattern
+      enabled: false
+
+viewer:                          # appearance (see nr_modem_config.yaml for every option)
+  default_view: aligned
+  expand_depth: 2
+  groups: { vars: { all: true } }
+
+output:
+  html: out/profile.html
+  json: out/profile.json
+  window: { start: "-1 symbol", end: "12 slot" }   # NW frame; periodic ISRs repeat across the window

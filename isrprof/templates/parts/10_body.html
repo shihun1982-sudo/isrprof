@@ -1,0 +1,102 @@
+<header class="top">
+  <h1>ISR Profiler <span class="sub" id="proj"></span></h1>
+  <div class="chips" id="hdr-chips"></div>
+  <nav class="tabs" role="tablist">
+    <button class="tog" id="panels-collapse" title="collapse every window">▸ collapse all</button>
+    <button class="tog" id="panels-expand" title="expand every window">▾ expand all</button>
+    <button role="tab" data-tab="timing" aria-selected="true">Timing 3D</button>
+    <button role="tab" data-tab="structure" aria-selected="false">Structure (DSM)</button>
+  </nav>
+</header>
+
+<details class="panel ctl" id="ctl-panel" open>
+<summary>Controls <span class="hint">cores · ISR · unit · call graph · focus · 3D time range</span></summary>
+<div class="body controls">
+  <div class="group"><label>Cores</label><span id="core-toggles"></span></div>
+  <div class="group"><label for="isr-sel">ISR</label><select id="isr-sel" class="tog"></select></div>
+  <div class="group"><label>Unit</label>
+    <button class="tog" id="unit-sym" aria-pressed="true">symbol</button>
+    <button class="tog" id="unit-us" aria-pressed="false">µs</button></div>
+  <div class="group"><label>Call graph</label>
+    <button class="tog" id="exp-all">Expand all</button>
+    <button class="tog" id="col-all">Collapse to ISR</button>
+    <button class="tog" id="inst-all" aria-pressed="false" title="draw the call subtree for every periodic instance, not only the selected one">all instances</button></div>
+  <div class="group"><label>Focus</label>
+    <button class="tog" id="focus-self" aria-pressed="false" title="relate only the selected function">this function only</button>
+    <button class="tog" id="focus-deep" aria-pressed="true" title="relate the selected function plus every callee down to the leaves">include callees to leaves</button>
+    <button class="tog" id="focus-clear" title="Esc">Clear</button>
+    <span id="focus-info" class="info"></span></div>
+  <div class="group"><label>3D time range</label>
+    <span id="range-info" class="info"></span>
+    <button class="tog" id="range-full" title="show the whole configured window (drag on a timeline to zoom into a range)">Full window</button>
+    <label for="tscale">scale</label><input type="range" id="tscale" min="-2" max="3" step="0.5" value="0" title="stretch / compress the 3D time axis"></div>
+</div>
+</details>
+
+<main>
+  <section id="tab-timing">
+    <details class="panel" id="sw-panel" open>
+      <summary>SW structure <span class="hint">cores in parallel · modules · shared heap / global / static variables · IPC channels — click a module to expand, a function to focus</span></summary>
+      <div class="body" id="sw"></div>
+    </details>
+
+    <div class="stack-wrap">
+      <div class="stack">
+        <details class="panel" id="scene-panel" open>
+          <summary>Timing diagram <span class="hint">time → on the NW slot/symbol grid · top rows: SW structure touched (modules, shared variables, IPC, heap) · middle: cores → timing lanes with the call graph (rows = call depth) · bottom rows: HW blocks on their HW timing lines with deadlines · aligned view: drag pans, wheel zooms time, shift+wheel scrolls rows · 3D view: drag rotates</span></summary>
+          <div class="body scene-body">
+            <div id="scene">
+              <div class="axes"></div>
+              <div id="ovw" class="ovw"></div>
+              <div class="views">
+                <button class="tog" data-view="aligned" aria-pressed="true" title="orthographic front view: every row group shares one horizontal time axis">Aligned</button>
+                <button class="tog" data-view="tilt" title="orthographic view tilted around the time axis: call depth, SW rows (behind) and HW rows (in front) read as depth while time stays aligned">Tilt</button>
+                <button class="tog" data-view="iso" title="perspective view, free rotation (depth = call depth)">3D</button><button class="tog" data-view="front">Front</button>
+                <button class="tog" data-view="side">Side</button><button class="tog" data-view="top">Top</button>
+                <button class="tog" data-view="zin" title="zoom in (or mouse wheel)">＋</button><button class="tog" data-view="zout" title="zoom out (or mouse wheel)">－</button>
+              </div>
+              <div class="legend" id="legend"></div>
+            </div>
+          </div>
+        </details>
+      </div>
+      <aside id="side">
+        <details class="panel" id="tree-panel" open>
+          <summary>Call graph <span class="hint">▸ expands · name inspects · ◂ ▸ steps periodic instances</span></summary>
+          <div class="body" id="tree"><div class="tree" id="tree-body"></div></div>
+        </details>
+        <details class="panel" id="detail-panel" open>
+          <summary>Details <span class="hint">selected function / HW block and everything related to it</span></summary>
+          <div class="body" id="detail"><div id="detail-body"></div></div>
+        </details>
+      </aside>
+    </div>
+
+    <details class="panel" id="hw-panel" open>
+      <summary>HW blocks <span class="hint">block diagram with registers, per-destination deadlines and accessors — click a block to highlight its accessors everywhere</span></summary>
+      <div class="body" id="hw"></div>
+    </details>
+  </section>
+
+  <section id="tab-structure" hidden>
+    <div class="tiles" id="tiles"></div>
+    <details class="panel" id="dsm-panel" open>
+      <summary>Dependency Structure Matrix <span class="hint">rows call columns · levelized order (highest level first) · red = feedback dependency (cycle) · click a module header to collapse / expand</span></summary>
+      <div class="body">
+        <div class="leg"><span><i style="background:var(--accent-soft)"></i>downward dependency (healthy)</span><span><i style="background:var(--critical)"></i>feedback / upward (part of a tangle)</span><span><i style="background:var(--panel-2)"></i>self</span>
+          <span style="margin-left:auto"><button class="tog" id="dsm-col">Collapse all modules</button> <button class="tog" id="dsm-exp">Expand all</button></span></div>
+        <div class="dsm-wrap" id="dsm"></div>
+      </div>
+    </details>
+    <details class="panel" id="lsm-panel" open>
+      <summary>Levelized Structure Map <span class="hint">modules by dependency level, leaves at the bottom · red edges go upward · click a module to show its functions</span></summary>
+      <div class="body" id="lsm"></div>
+    </details>
+    <details class="panel" id="viol-panel" open>
+      <summary>Tangles &amp; architecture rule violations</summary>
+      <div class="body" id="viol"></div>
+    </details>
+  </section>
+</main>
+<p class="foot" id="foot"></p>
+<div id="tip" role="tooltip"></div>

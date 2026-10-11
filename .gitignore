@@ -1,0 +1,16 @@
+# generated profiles (re-create with: python -m isrprof --config examples/<config>.yaml)
+examples/out/*.html
+examples/out/*.json
+examples/out_debug.json
+# LLM reply cache
+.isrprof_llm_cache.json
+examples/.isrprof_llm_cache.json
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+# editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

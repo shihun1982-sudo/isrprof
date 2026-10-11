@@ -1,0 +1,17 @@
+# Free-text notes merged into the viewer (tooltips / details).  Keys are function names (or
+# "name@file.c" for file-static functions), HW block ids, variable names and ISR names.
+functions:
+  dl_pdsch_run: "PDSCH decode pipeline; stages dispatched through k_pdsch_stages (function-pointer table)"
+  hal_ldpc_wait: "known smell: HAL waits on the decoder and calls up into the L1C scheduler"
+  dl_harq_buffer: "allocates the soft-bit buffer lazily - heap use inside the PDSCH ISR path"
+  mac_if_indicate: "L1C module code, but also executed on core 1 when a TB is delivered"
+  sync_track_update: "TTL/FTL loops; results feed the frame timer (core 0) and the TA (core 2)"
+blocks:
+  LDPC_DEC: "shared decoder; the per-slot deadline follows the HARQ-ACK k1 budget"
+  POLAR: "shared by PDCCH (core 1) and PBCH (core 3) - separate deadlines per core"
+  RFIC: "AGC gain from core 1, TA / TX gate / power from core 2, AFC from core 3"
+variables:
+  g_nw_timing: "written by core 0 only; readers must tolerate a torn read across fields"
+  g_dl_harq_ack: "single-slot handshake core 1 -> core 2 (PUCCH) and core 0 (HARQ bookkeeping)"
+isrs:
+  DL_PDSCH_ISR: "decode spills into the next slot by design; LDPC start must stay before 0.9 sym"

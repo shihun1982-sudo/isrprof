@@ -1,0 +1,291 @@
+# isrprof configuration - 4-core NR L1 modem (mu = 1, 30 kHz SCS)
+#
+#   core0 L1C   : frame timer / slot scheduler / MAC mailbox (slot tick, mailbox, mid-slot IPC ISRs)
+#   core1 DLPHY : RX chain  RFIC(AGC) -> DFE_RX -> FFT -> CHEST -> EQ -> DEMAP -> DESCR -> RDM/HARQ -> LDPC -> CRC
+#                 (symbol ISR, PDCCH ISR, PDSCH ISR)
+#   core2 ULPHY : TX chain  ULENC / UCI_ENC / SRS -> MAP -> IFFT -> DFE_TX -> RFIC  (symbol, PUSCH prep, PUCCH, SRS ISRs)
+#   core3 MEAS  : TTL/FTL tracking, CSI-RS, SSB search (track, CSI-RS, SSB ISRs)
+#
+# Timing lines: NW timing is the reference; sw lines (slot_tick / dl / dl_hi / ul / meas) carry the ISRs,
+# hw lines (hw_rx / hw_tx / hw_ctrl) carry the HW blocks' control timing and deadlines.  Add lines freely.
+
+project:
+  name: "NR L1 modem (4 cores, mu=1)"
+  sources:
+    - "nr_modem/**/*.c"
+    - "nr_modem/**/*.h"
+
+parser:
+  backend: builtin
+  ignore_calls: [sizeof, memcpy, memset, ASSERT, irq_lock, irq_unlock, HW_REG]
+
+numerology:
+  mu: 1
+  symbols_per_slot: 14
+
+cores:
+  - id: 0
+    name: "Core0 L1C"
+    clock_mhz: 800
+    modules:
+      - { name: l1c_timer,  files: ["nr_modem/l1c/l1c_timer.c"] }
+      - { name: l1c_sched,  files: ["nr_modem/l1c/l1c_sched.c", "nr_modem/l1c/l1c_sched.h"] }
+      - { name: l1c_mac_if, files: ["nr_modem/l1c/l1c_mac_if.c"] }
+      - { name: common,     files: ["nr_modem/common/*", "nr_modem/hal/*"] }
+  - id: 1
+    name: "Core1 DLPHY"
+    clock_mhz: 1200
+    modules:
+      - { name: dl_isr,   files: ["nr_modem/dl/dl_isr.c"] }
+      - { name: dl_fe,    files: ["nr_modem/dl/dl_fe.c"] }
+      - { name: dl_chest, files: ["nr_modem/dl/dl_chest.c"] }
+      - { name: dl_pdcch, files: ["nr_modem/dl/dl_pdcch.c"] }
+      - { name: dl_pdsch, files: ["nr_modem/dl/dl_pdsch.c"] }
+      - { name: dl_drv,   files: ["nr_modem/dl/dl_drv.c", "nr_modem/dl/dl_drv.h", "nr_modem/dl/dl_phy.h"] }
+  - id: 2
+    name: "Core2 ULPHY"
+    clock_mhz: 1200
+    modules:
+      - { name: ul_isr,   files: ["nr_modem/ul/ul_isr.c"] }
+      - { name: ul_fe,    files: ["nr_modem/ul/ul_fe.c"] }
+      - { name: ul_pusch, files: ["nr_modem/ul/ul_pusch.c"] }
+      - { name: ul_pucch, files: ["nr_modem/ul/ul_pucch.c"] }
+      - { name: ul_drv,   files: ["nr_modem/ul/ul_drv.c", "nr_modem/ul/ul_drv.h", "nr_modem/ul/ul_phy.h"] }
+  - id: 3
+    name: "Core3 MEAS"
+    clock_mhz: 600
+    modules:
+      - { name: meas_isr, files: ["nr_modem/meas/meas_isr.c"] }
+      - { name: sync,     files: ["nr_modem/meas/sync.c"] }
+      - { name: csi,      files: ["nr_modem/meas/csi.c"] }
+      - { name: meas_drv, files: ["nr_modem/meas/meas_drv.c", "nr_modem/meas/meas_drv.h", "nr_modem/meas/meas.h"] }
+
+timing_items:
+  - { id: nw,        name: "NW timing",       offset: "0 symbol",     kind: ref, priority: 0 }
+  - { id: slot_tick, name: "Slot tick",       offset: "-1 symbol",    kind: sw,  priority: 1, description: "pre-slot scheduling tick on L1C" }
+  - { id: dl,        name: "DL timing",       offset: "-0.3 symbol",  kind: sw,  priority: 2, description: "DL symbol timing = NW - FFT window shift" }
+  - { id: dl_hi,     name: "DL hi-prio",      offset: "-0.3 symbol",  kind: sw,  priority: 3, description: "same timebase as DL, higher interrupt priority" }
+  - { id: ul,        name: "UL timing (TA)",  offset: "+2 symbol",    kind: sw,  priority: 4, description: "UL transmit timing = NW + timing advance" }
+  - { id: meas,      name: "MEAS timing",     offset: "-0.3 symbol",  kind: sw,  priority: 5, description: "measurement core follows DL timing, lowest priority" }
+  - { id: hw_rx,     name: "HW RX line",      offset: "-0.45 symbol", kind: hw,  description: "RX datapath timing (FFT window start)" }
+  - { id: hw_tx,     name: "HW TX line",      offset: "+1.8 symbol",  kind: hw,  description: "TX datapath timing (DAC) = UL - analog delay" }
+  - { id: hw_ctrl,   name: "HW control line", offset: "0 symbol",     kind: hw,  description: "timer / mailbox / DMA on NW timing" }
+
+isrs:
+  # core 0 L1C
+  - { name: SLOT_TICK_ISR, core: 0, timing: slot_tick, entry: slot_tick_isr, start: "0 symbol",   length: "0.9 symbol", period: "1 slot",  priority: 2 }
+  - { name: MBOX_ISR,      core: 0, timing: nw,        entry: mbox_isr,      start: "0.5 symbol", length: "0.6 symbol", period: "1 slot",  priority: 1, description: "MAC -> L1 message (UL TB / config)" }
+  - { name: L1C_IPC_ISR,   core: 0, timing: nw,        entry: l1c_ipc_isr,   start: "3.2 symbol", length: "0.6 symbol", period: "1 slot",  priority: 1, description: "DCI from DL core, measurement reports" }
+  # core 1 DL PHY
+  - { name: DL_SYMBOL_ISR, core: 1, timing: dl,    entry: dl_symbol_isr, start: "0 symbol",    length: "0.5 symbol", period: "1 symbol", priority: 3 }
+  - { name: DL_PDCCH_ISR,  core: 1, timing: dl_hi, entry: dl_pdcch_isr,  start: "2.2 symbol",  length: "1.6 symbol", period: "1 slot",   priority: 5, description: "CORESET through the FFT -> blind decode" }
+  - { name: DL_PDSCH_ISR,  core: 1, timing: dl_hi, entry: dl_pdsch_isr,  start: "13.3 symbol", length: "3.2 symbol", period: "1 slot",   priority: 4, description: "last PDSCH symbol in -> decode pipeline" }
+  # core 2 UL PHY
+  - { name: UL_SYMBOL_ISR,  core: 2, timing: ul, entry: ul_symbol_isr,  start: "0 symbol",    length: "0.45 symbol", period: "1 symbol", priority: 3 }
+  - { name: UL_TX_PREP_ISR, core: 2, timing: ul, entry: ul_tx_prep_isr, start: "9.5 symbol",  length: "2.8 symbol",  period: "1 slot",   priority: 4, description: "PUSCH for the next slot" }
+  - { name: UL_PUCCH_ISR,   core: 2, timing: ul, entry: ul_pucch_isr,   start: "11.0 symbol", length: "1.0 symbol",  period: "1 slot",   priority: 4 }
+  - { name: UL_SRS_ISR,     core: 2, timing: ul, entry: ul_srs_isr,     start: "12.5 symbol", length: "0.6 symbol",  period: "5 slot",   priority: 2 }
+  # core 3 MEAS
+  - { name: TRACK_ISR, core: 3, timing: dl,   entry: track_isr, start: "7.0 symbol", length: "0.8 symbol", period: "1 slot",  priority: 2, description: "TTL / FTL from the DMRS channel estimate" }
+  - { name: CSIRS_ISR, core: 3, timing: meas, entry: csirs_isr, start: "4.0 symbol", length: "1.6 symbol", period: "5 slot",  priority: 1 }
+  - { name: SSB_ISR,   core: 3, timing: meas, entry: ssb_isr,   start: "0 symbol",   length: "4.0 symbol", period: "10 slot", priority: 1, description: "SSB half-frame: PSS/SSS, PBCH, cell measurement" }
+
+hw:
+  macros:
+    read:  [HW_RD, HW_POLL]          # simple registrations use block_arg / reg_arg below
+    write: [HW_WR]
+    rmw:   [HW_RMW]
+    block_arg: 0
+    reg_arg: 1
+    auto_detect_volatile: true
+    custom:                          # any argument layout: REGISTER_READ(STATUS, , DFE_RX) -> read DFE_RX.STATUS
+      - { name: REGISTER_READ, kind: read, reg_arg: 0, block_arg: 2 }
+      # - { name: RXF_WR, kind: write, block: RXF, reg_arg: 0 }                      fixed block
+      # - { name: REG_WR, kind: write, reg_arg: 0, block_from_reg: "^([A-Z0-9]+)_" } block from the register name
+  block_aliases: { rxf: DFE_RX, dfe_rx: DFE_RX }   # names used in code -> block ids (matching is also case-insensitive)
+  default_line: hw_ctrl
+  blocks:
+    # control
+    - { id: TIMER, name: "Frame timer",   base: 0x50000000, group: control, pos: [0, 0], line: hw_ctrl, regs: [SFN, SLOT, SYM, CMP0, CMP1, CORR],
+        deadline: { at: "13.8 symbol", period: "1 slot", note: "next compare armed before the slot boundary" } }
+    - { id: MBOX,  name: "MAC mailbox",   base: 0x50001000, group: control, pos: [1, 0], line: hw_ctrl, regs: [TX, RX, STATUS, IRQ_CLR],
+        deadline: { at: "2.0 symbol", period: "1 slot", note: "MAC messages consumed / indicated early in the slot" } }
+    - { id: DMA,   name: "TB DMA",        base: 0x50002000, group: control, pos: [2, 0], line: hw_ctrl, regs: [SRC, DST, LEN, CTRL, STATUS] }
+    - id: RFIC
+      name: "RF transceiver"
+      base: 0x50003000
+      group: control
+      pos: [3, 0]
+      line: hw_rx
+      regs: [RSSI, RX_GAIN, TX_GAIN, AFC, TA, TX_GATE, PA_CTRL]
+      deadlines:
+        - { at: "0.55 symbol", period: "1 symbol", cores: [1], note: "AGC gain before the next RX symbol" }
+        - { timing: hw_tx, at: "0.7 symbol", period: "1 symbol", cores: [2], note: "TA / TX gate / power before the TX symbol" }
+        - { at: "9.0 symbol", period: "1 slot", cores: [3], note: "AFC update once per slot" }
+    # RX chain
+    - { id: DFE_RX, name: "RX digital front end", base: 0x50010000, group: rx, pos: [0, 1], line: hw_rx, regs: [CTRL, DCOC, IQCORR, DECIM, START],
+        deadline: { at: "0.35 symbol", period: "1 symbol" } }
+    - { id: FFT,    name: "FFT",                  base: 0x50011000, group: rx, pos: [1, 1], line: hw_rx, regs: [CTRL, SIZE, CP_LEN, START, STATUS],
+        deadline: { at: "0.5 symbol", period: "1 symbol", note: "kick before the symbol's samples are complete" } }
+    - { id: CHEST,  name: "Channel estimator",    base: 0x50012000, group: rx, pos: [2, 1], line: hw_rx, regs: [CTRL, DMRS_CFG, START, STATUS, NOISE, TO_EST, FO_EST],
+        deadline: { at: "0.9 symbol", period: "1 symbol" } }
+    - { id: EQ,     name: "Equalizer (MMSE)",     base: 0x50013000, group: rx, pos: [3, 1], line: hw_rx, regs: [CTRL, MODE, START, STATUS],
+        deadline: { at: "13.95 symbol", period: "1 slot" } }
+    - { id: DEMAP,  name: "Demapper / LLR",       base: 0x50014000, group: rx, pos: [0, 2], line: hw_rx, regs: [CTRL, MOD_ORDER, LLR_SCALE, START, STATUS],
+        deadline: { at: "14.1 symbol", period: "1 slot" } }
+    - { id: DESCR,  name: "Descrambler",          base: 0x50015000, group: rx, pos: [1, 2], line: hw_rx, regs: [CTRL, SEED, START],
+        deadline: { at: "14.2 symbol", period: "1 slot" } }
+    - { id: RDM,    name: "Rate de-matcher",      base: 0x50016000, group: rx, pos: [2, 2], line: hw_rx, regs: [CTRL, RV, START, STATUS],
+        deadline: { at: "14.4 symbol", period: "1 slot" } }
+    - { id: HARQ_BUF, name: "HARQ soft buffer",   base: 0x50017000, group: rx, pos: [3, 2], line: hw_rx, regs: [BASE_ADDR, CTRL, COMBINE, FLUSH],
+        deadline: { at: "14.4 symbol", period: "1 slot" } }
+    - { id: LDPC_DEC, name: "LDPC decoder",       base: 0x50018000, group: rx, pos: [0, 3], line: hw_rx, regs: [CTRL, BG, ITER_MAX, START, STATUS, ITER_CNT],
+        deadline: { at: "14.9 symbol", period: "1 slot", note: "decode must start by 0.9 sym of the next slot to meet HARQ-ACK k1" } }
+    - { id: CRC,    name: "CRC",                  base: 0x50019000, group: rx, pos: [1, 3], line: hw_rx, regs: [CTRL, START, RESULT],
+        deadline: { at: "15.9 symbol", period: "1 slot" } }
+    - id: POLAR
+      name: "Polar decoder (PDCCH / PBCH)"
+      base: 0x5001A000
+      group: rx
+      pos: [2, 3]
+      line: hw_rx
+      regs: [CTRL, LIST_SIZE, START, STATUS, OUT]
+      deadlines:
+        - { at: "3.1 symbol", period: "1 slot", cores: [1], note: "DCI out in time for same-slot PDSCH / L1C" }
+        - { at: "6.0 symbol", period: "10 slot", cores: [3], note: "PBCH within the SSB half frame" }
+    - { id: CSIRS,  name: "CSI-RS engine",        base: 0x5001B000, group: meas, pos: [3, 3], line: hw_rx, regs: [CTRL, CFG, START, STATUS, RSRP],
+        deadline: { at: "6.5 symbol", period: "5 slot" } }
+    - { id: SSB,    name: "SSB correlator",       base: 0x5001C000, group: meas, pos: [0, 4], line: hw_rx, regs: [CTRL, PSS_START, SSS_START, STATUS, PEAK],
+        deadline: { at: "5.0 symbol", period: "10 slot" } }
+    # TX chain
+    - { id: ULENC,   name: "UL encoder (CRC/LDPC/RM/scr/mod)", base: 0x50020000, group: tx, pos: [1, 4], line: hw_tx, regs: [CTRL, BG, TBS, RV, SCR_SEED, MOD_ORDER, START, STATUS],
+        deadline: { at: "13.2 symbol", period: "1 slot", note: "encoded before the slot boundary" } }
+    - { id: UCI_ENC, name: "UCI encoder",         base: 0x50021000, group: tx, pos: [2, 4], line: hw_tx, regs: [CTRL, LEN, START, STATUS],
+        deadline: { at: "12.8 symbol", period: "1 slot" } }
+    - { id: SRS,     name: "SRS generator",       base: 0x50022000, group: tx, pos: [3, 4], line: hw_tx, regs: [CTRL, SEQ, START],
+        deadline: { at: "13.5 symbol", period: "5 slot" } }
+    - { id: MAP,     name: "RE mapper",           base: 0x50023000, group: tx, pos: [0, 5], line: hw_tx, regs: [CTRL, PRB_START, PRB_LEN, DMRS_POS, START],
+        deadline: { at: "13.6 symbol", period: "1 slot" } }
+    - { id: IFFT,    name: "IFFT",                base: 0x50024000, group: tx, pos: [1, 5], line: hw_tx, regs: [CTRL, SIZE, CP_LEN, START, STATUS],
+        deadline: { at: "0.5 symbol", period: "1 symbol" } }
+    - { id: DFE_TX,  name: "TX digital front end", base: 0x50025000, group: tx, pos: [2, 5], line: hw_tx, regs: [CTRL, UPSAMP, DPD, START],
+        deadline: { at: "0.6 symbol", period: "1 symbol" } }
+
+memory:
+  heap_functions: [malloc, calloc, pool_alloc, pool_free]
+  globals:                         # registered shared structures (defined outside these sources); direct
+    - { name: ASA, kind: global,   #  accesses (ASA.dl.x) and accessor macros are tracked per field
+        note: "Air-interface State Area, platform library" }
+  access_macros:
+    - { name: ASA_GET, rw: r, var: ASA, field_arg: 0 }    # ASA_GET(dl.agc_target_dbm)  -> read  ASA.dl.agc_target_dbm
+    - { name: ASA_SET, rw: w, var: ASA, field_arg: 0 }    # ASA_SET(dl.dcoc_overflow, 1) -> write ASA.dl.dcoc_overflow
+    # - { name: SHM_WR, rw: w, var_arg: 0, field_arg: 1 } # variable name taken from an argument
+  ipc:
+    macros: [IPC_SEND, IPC_RECV]
+    channel_arg: 0
+    channels:
+      - { id: CH_MAC_TO_L1,   from: 0, to: 0 }
+      - { id: CH_L1_TO_MAC,   from: 0, to: 0 }
+      - { id: CH_L1C_TO_DL,   from: 0, to: 1 }
+      - { id: CH_L1C_TO_UL,   from: 0, to: 2 }
+      - { id: CH_DL_TO_L1C,   from: 1, to: 0 }
+      - { id: CH_DL_TO_UL,    from: 1, to: 2 }
+      - { id: CH_MEAS_TO_L1C, from: 3, to: 0 }
+      - { id: CH_L1C_TO_MEAS, from: 0, to: 3 }
+
+architecture:
+  layers:
+    - { name: ISR,       functions: ["*_isr"] }
+    - { name: Control,   functions: ["l1c_*", "sched_*", "timer_*", "mac_if_*"] }
+    - { name: Pipeline,  functions: ["dl_*", "pdcch_*", "stage_*", "ul_*", "sync_*", "csi_*", "ipc_*", "pool_*"] }
+    - { name: Driver,    functions: ["drv_*"] }
+    - { name: HAL,       functions: ["hal_*"] }
+  rules:
+    - { name: "no heap in DL pipeline", deny: { from: "dl_*", to: "pool_alloc" } }
+    - { name: "no heap in MAC mailbox ISR path", deny: { from: "mac_if_*", to: "pool_alloc" } }
+  fat_threshold: 8
+  allow_skip_layer: true
+
+cost_model:
+  source_priority: [trace, config, llm, default]
+  default_cost: "0.03 symbol"
+  external_cost: "0.01 symbol"
+  function_costs:                 # exact names first, then glob patterns (first match wins)
+    drv_polar_decode: "0.22 symbol"
+    drv_pbch_polar_decode: "0.4 symbol"
+    drv_ulenc_run: "0.6 symbol"
+    drv_uci_encode: "0.15 symbol"
+    drv_csirs_read_rsrp: "0.5 symbol"
+    drv_ssb_sss_detect: "1.5 symbol"
+    drv_ldpc_poll: "0.02 symbol"
+    hal_ldpc_wait: "0.5 symbol"
+    stage_ldpc_decode: "0.3 symbol"
+    pdcch_blind_decode: "0.2 symbol"
+    pool_alloc: "0.2 symbol"
+    ul_encode_tb: "0.1 symbol"
+    ul_dmrs_gen: "0.15 symbol"
+    sched_pick_ul: "0.1 symbol"
+    sched_tpc_ta: "0.08 symbol"
+    l1c_harq_tick: "0.08 symbol"
+    csi_compute_report: "0.2 symbol"
+    sync_measure_cell: "0.1 symbol"
+    "*_isr": "0.03 symbol"
+    "drv_*": "0.04 symbol"
+    "hal_*": "0.02 symbol"
+    "timer_*": "0.05 symbol"
+    "sched_*": "0.08 symbol"
+    "mac_if_*": "0.06 symbol"
+    "l1c_*": "0.05 symbol"
+    "stage_*": "0.06 symbol"
+    "pdcch_*": "0.08 symbol"
+    "dl_*": "0.05 symbol"
+    "ul_*": "0.06 symbol"
+    "sync_*": "0.1 symbol"
+    "csi_*": "0.1 symbol"
+    "ipc_*": "0.04 symbol"
+
+llm:
+  enabled: false
+  provider: anthropic
+  model: claude-opus-5-5
+  effort: medium
+  api_key_env: ANTHROPIC_API_KEY
+  max_tokens: 4096
+  cache_file: .isrprof_llm_cache.json
+  tasks:
+    estimate_costs:   { enabled: true, reg_access_cycles: 40 }
+    classify_hw_macro: { enabled: true }
+    summarize:        { enabled: false }
+    suggest_layers:   { enabled: false }
+
+# ---------------------------------------------------------------- viewer appearance (all optional; defaults in config.py)
+viewer:
+  default_view: aligned          # aligned | tilt | 3d
+  tilt_deg: 18                   # tilt view: rotation around the time axis
+  theme: auto                    # auto | light | dark
+  unit: sym                      # sym | us
+  row_px: 15                     # pixel height of one call-depth row (scale 1)
+  label_margin_px: 215           # left label column of the timing diagram
+  expand_depth: 2                # call-tree levels expanded at load (1 = ISR entries only)
+  max_instances: 1500            # cap on periodic instances drawn per ISR
+  connectors: all                # all | focus | none  (lines from function boxes to SW rows above / HW rows below)
+  legend: true
+  colors:                        # categorical palette = modules / cores; semantic colours override the theme
+    read: "#2a78d6"
+    write: "#eb6834"
+    miss: "#d03b3b"
+  groups:                        # row groups of the timing diagram
+    modules: { open: true, functions: false }
+    vars:    { open: true, all: false }      # all: false -> cross-core + related variables only
+    ipc:     { open: true }
+    heap:    { open: true }
+    blocks:  { open: true, registers: false }
+  sw_structure: { open_modules: [dl_pdsch] }  # modules expanded in the SW structure diagram at load
+  # window_range: [0, 1.5]       # initial 3D time range in slots (default: whole window)
+
+annotations_file: nr_modem_annotations.yaml   # free-text notes for functions / blocks / variables / ISRs
+
+output:
+  html: out/nr_modem.html
+  json: out/nr_modem.json
+  window: { start: "-1 symbol", end: "12 slot" }
