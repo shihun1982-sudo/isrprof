@@ -1,6 +1,6 @@
-# generated profiles (re-create with: python -m isrprof --config examples/<config>.yaml)
-examples/out/*.html
-examples/out/*.json
+# generated profiles and local screenshots (re-create with: python -m isrprof --config examples/<config>.yaml);
+# curated screenshots live in docs/img
+examples/out/
 examples/out_debug.json
 # LLM reply cache
 .isrprof_llm_cache.json
