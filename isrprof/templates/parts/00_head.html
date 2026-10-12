@@ -72,19 +72,19 @@ input[type="range"] { vertical-align: middle; width: 80px; accent-color: var(--a
 #scene canvas { display: block; }
 #scene .ovw { position: absolute; top: 4px; height: 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
 #scene .ovw svg { display: block; }
-#scene .legend { position: absolute; left: 10px; bottom: 6px; right: 10px; display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; line-height: 1.3; color: var(--muted); pointer-events: none; }
-#scene .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.scene-body .legend { display: flex; flex-wrap: wrap; gap: 1px 10px; font-size: 10.5px; line-height: 1.3; color: var(--muted); padding: 3px 10px 4px; border-top: 1px solid var(--line); }
+.scene-body .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: 0; }
 #scene .axes { position: absolute; left: 10px; top: 6px; right: 330px; font-size: 11px; color: var(--muted); font-family: var(--mono); pointer-events: none; }
-#scene .views { position: absolute; right: 8px; bottom: 44px; display: flex; gap: 4px; }
+#scene .views { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 3px; }
 #scene .views button { font-size: 11.5px; padding: 2px 8px; }
 #scene .nogl { padding: 8px 0; color: var(--muted); }
 aside#side { position: sticky; top: 4px; display: flex; flex-direction: column; gap: 0; min-width: 0; height: calc(100vh - 8px); }
-aside#side > details.panel { display: flex; flex-direction: column; min-height: 0; margin: 0; }
+aside#side > details.panel { display: flex; flex-direction: column; min-height: 0; margin: 0; overflow: hidden; }
 aside#side > details.panel:not([open]) { flex: 0 0 auto; }
 #tree-panel[open] { flex: 0 0 var(--tree-h, 48%); }
 #detail-panel[open] { flex: 1 1 0; }
 aside#side > details.panel > .body { flex: 1 1 0; min-height: 0; overflow: auto; }
-#tree, #detail { height: auto !important; max-height: none; overflow: visible; }
+#tree, #detail { height: auto; max-height: none; overflow: auto; min-height: 0; }   /* the panel body itself scrolls; the flex basis of the panel sets its height */
 #hsplit { height: 9px; margin: 2px 10px; border-radius: 4px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; touch-action: none; flex: 0 0 auto; }
 #hsplit i { display: block; width: 44px; height: 3px; border-radius: 2px; background: var(--line-strong); }
 #hsplit:hover, #hsplit.on { background: var(--accent-soft); } #hsplit:hover i, #hsplit.on i { background: var(--accent); }

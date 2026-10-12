@@ -102,6 +102,9 @@ def check(report: dict) -> list[str]:
         bad.append("unrelated SW / HW boxes were not dimmed")
     if sel.get("outline") is False:
         bad.append("selection outline not shown in the 3D diagram")
+    sc = st.get("side column clipping", {})
+    if sc and not (sc.get("overlap", 1) <= 0 and (sc.get("treeScrolls") or sc.get("lastRowBottom", 0) <= sc.get("treeBottom", 0))):
+        bad.append(f"call graph overflows into the details panel instead of scrolling: {sc}")
     ds = st.get("details sections", {})
     if ds and not (ds.get("swFirst") and ds.get("swRows", 0) > 0 and ds.get("swAncestors", 0) > 0 and ds.get("hwRows", 0) > 0 and ds.get("regs", 0) > 0 and ds.get("collapsible")):
         bad.append(f"details sections (SW hierarchy first, HW second, collapsible) not as expected: {ds}")
@@ -183,7 +186,7 @@ def check(report: dict) -> list[str]:
     rs = st.get("resize side / windows", {})
     if rs and (abs(rs.get("sideW", 0) - 500) > 2 or rs.get("handles", 0) < 3 or abs(rs.get("sideDrag", 0) - 150) > 3
                or abs(rs.get("treeAfter", 0) - rs.get("treeBefore", 0) - 120) > 3
-               or abs(rs.get("swBefore", 0) - rs.get("swAfter", 0) - 60) > 3
+               or abs(rs.get("swBefore", 0) - rs.get("swAfter", 0) - 40) > 3
                or abs(rs.get("sceneAfter", 0) - rs.get("sceneBefore", 0) - 90) > 3):
         bad.append(f"dragging a window handle did not resize it: {rs}")
     if "µs" not in st.get("unit us", {}).get("text", ""):
