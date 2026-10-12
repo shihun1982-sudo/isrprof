@@ -94,34 +94,53 @@ class StructureAnalyzer:
         self.func_meta = {f.id: f for f in pr.functions}
         self.layers = cfg.layers
         self.ignore_external = cfg.architecture["ignore_external"]
+        # file -> module and fid -> layer are resolved once (fnmatch over every pattern per call is the
+        # dominant cost on big trees); the pipeline can hand in its own file map to share the work
+        self._module_by_file: dict[str, str] = {}
+        self._layer_by_fid: dict[str, int | None] = {}
+        self._mod_patterns = [(m["name"], pat) for core in cfg.cores for m in core.get("modules", []) for pat in m.get("files", [])]
+        self._rel_cache: dict[str, tuple[str, str]] = {}
+
+    def _rel(self, path: str) -> tuple[str, str]:
+        r = self._rel_cache.get(path)
+        if r is None:
+            r = (os.path.relpath(path, self.cfg.src_root).replace("\\", "/"), os.path.basename(path))
+            self._rel_cache[path] = r
+        return r
 
     # ---------------------------------------------------------------- helpers
     def module_of(self, fid: str) -> str:
         f = self.func_meta.get(fid)
         if f is None:
             return "<external>"
-        rel = os.path.relpath(f.file, self.cfg.base_dir).replace("\\", "/")
-        for core in self.cfg.cores:
-            for m in core.get("modules", []):
-                for pat in m.get("files", []):
-                    if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(os.path.basename(f.file), pat):
-                        return m["name"]
-        return os.path.splitext(os.path.basename(f.file))[0]
+        m = self._module_by_file.get(f.file)
+        if m is None:
+            rel, base = self._rel(f.file)
+            m = next((name for name, pat in self._mod_patterns if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(base, pat)),
+                     os.path.splitext(base)[0])
+            self._module_by_file[f.file] = m
+        return m
 
     def layer_of(self, fid: str) -> int | None:
+        if fid in self._layer_by_fid:
+            return self._layer_by_fid[fid]
         f = self.func_meta.get(fid)
         name = fid.split("@")[0]
-        rel = "" if f is None else os.path.relpath(f.file, self.cfg.base_dir).replace("\\", "/")
+        rel, base = ("", "") if f is None else self._rel(f.file)
         mod = self.module_of(fid)
+        res = None
         for i, L in enumerate(self.layers):
-            if any(fnmatch.fnmatch(name, p) for p in L.functions):
-                return i
-            if f is not None and any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(os.path.basename(f.file), p)
-                                     for p in L.files):
-                return i
+            if any(fnmatch.fnmatchcase(name, p) for p in L.functions):
+                res = i
+                break
+            if f is not None and any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(base, p) for p in L.files):
+                res = i
+                break
             if mod in L.modules:
-                return i
-        return None
+                res = i
+                break
+        self._layer_by_fid[fid] = res
+        return res
 
     # ---------------------------------------------------------------- main
     def analyze(self) -> dict:
@@ -131,7 +150,7 @@ class StructureAnalyzer:
             fids = set(isr["functions"])
             slices[isr["name"]] = sorted(fids)
             reach_all |= fids
-        include_unreached = bool(self.cfg.raw.get("architecture", {}).get("include_unreached", False))
+        include_unreached = bool(self.cfg.architecture.get("include_unreached", False))
         nodes = set(reach_all)
         if include_unreached:
             nodes |= set(self.graph.keys())
@@ -259,7 +278,7 @@ class StructureAnalyzer:
                 "tangled": v in tangle_members,
                 "scc": comp_of[v] if v in tangle_members else None,
                 "core": self.fid_to_core.get(v),
-                "file": None if f is None else os.path.relpath(f.file, self.cfg.base_dir).replace("\\", "/"),
+                "file": None if f is None else os.path.relpath(f.file, self.cfg.src_root).replace("\\", "/"),
                 "line": None if f is None else f.line,
             }
 

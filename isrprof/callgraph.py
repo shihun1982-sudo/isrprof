@@ -63,7 +63,7 @@ class CallGraph:
         for f in pr.functions:
             self.by_name.setdefault(f.name, []).append(f)
             self.by_id[f.id] = f
-        self.max_depth = int(cfg.raw.get("callgraph", {}).get("max_depth", 24))
+        self.max_depth = int((cfg.parser.get("callgraph") or cfg.raw.get("callgraph", {}) or {}).get("max_depth", 24))
         self.block_deadlines = self._deadlines_nw()
 
     # ------------------------------------------------------------------ resolution

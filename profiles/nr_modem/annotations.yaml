@@ -15,3 +15,6 @@ variables:
   g_dl_harq_ack: "single-slot handshake core 1 -> core 2 (PUCCH) and core 0 (HARQ bookkeeping)"
 isrs:
   DL_PDSCH_ISR: "decode spills into the next slot by design; LDPC start must stay before 0.9 sym"
+nodes:
+  shm: "all cross-core traffic goes through these structures; arrows show the producer -> consumer direction"
+  rx_chain: "one symbol of samples per FFT; PDSCH decoding spills into the next slot by design"

@@ -7,7 +7,7 @@ sys.path.insert(0, ROOT)
 
 from isrprof import config, pipeline  # noqa: E402
 
-CFG = os.path.join(ROOT, "examples", "nr_modem_config.yaml")
+PROFILES = os.path.join(ROOT, "profiles")
 
 
 class NrModemTests(unittest.TestCase):
@@ -15,7 +15,7 @@ class NrModemTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.p = pipeline.run(config.load(CFG))
+        cls.p = pipeline.run(config.load("nr_modem", PROFILES))
         cls.isrs = {i["name"]: i for i in cls.p["isrs"]}
 
     def test_macro_wrapped_isr_entries(self):
@@ -45,9 +45,13 @@ class NrModemTests(unittest.TestCase):
         # the UL core's RFIC accesses are judged against the hw_tx deadline only
         ul_rf = [e for e in self.isrs["UL_SYMBOL_ISR"]["hw_events"] if e["block"] == "RFIC"]
         self.assertTrue(ul_rf)
-        self.assertTrue(all(abs(e["deadline_us"] - (blocks["RFIC"]["deadlines"][1]["offset_us"]
-                                                   + blocks["RFIC"]["deadlines"][1]["at_us"])) < 1e-6
-                            or e["deadline_us"] > 0 for e in ul_rf))
+        # every UL-core RFIC access is judged against the hw_tx deadline (periodic: some multiple of the period after it)
+        dl = blocks["RFIC"]["deadlines"][1]
+        self.assertEqual(dl["timing"], "hw_tx")
+        for e in ul_rf:
+            self.assertIsNotNone(e["deadline_us"])
+            k = (e["deadline_us"] - dl["offset_us"] - dl["at_us"]) / dl["period_us"]
+            self.assertAlmostEqual(k, round(k), places=4, msg=e)
 
     def test_poll_macro_is_a_read_and_shared_block_clients(self):
         hw = self.p["functions"]["drv_polar_decode"]["hw"]
@@ -71,9 +75,9 @@ class NrModemTests(unittest.TestCase):
 
     def test_viewer_section_and_annotations(self):
         v = self.p["viewer"]
-        self.assertEqual(v["default_view"], "aligned")
-        self.assertEqual(v["row_px"], 15)                      # default kept
-        self.assertEqual(v["groups"]["vars"]["all"], False)    # deep-merged user value
+        self.assertEqual(v["default_view"], "tilt")
+        self.assertEqual(v["row_px"], 12)                      # default kept
+        self.assertEqual(v["sw_structure"]["open"], ["dl_pdsch"])   # deep-merged user value
         self.assertEqual(len(v["colors"]["palette_light"]), 8)
         self.assertIn("function-pointer table", self.p["functions"]["dl_pdsch_run"]["note"])
         self.assertTrue(next(b for b in self.p["hw"]["blocks"] if b["id"] == "POLAR")["note"])

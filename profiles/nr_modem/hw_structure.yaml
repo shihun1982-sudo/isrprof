@@ -1,0 +1,145 @@
+# hw_structure.yaml - the HW structure diagram (bottom overlay).
+#
+# nodes     hierarchy of chains / groups / blocks drawn as nested boxes down to `depth`.  A node with
+#           `regs` (or kind: block) is a HW block the code can touch:
+#             base        register base address (informational)
+#             regs        register names (HW_WR(FFT, SIZE, v) -> FFT.SIZE)
+#             line        reference line (timing.references id) the block's deadlines are expressed in
+#             deadline / deadlines[]   {timing?, at, period?, note?, cores?, isrs?}: every access must land
+#                         before `at` (in the line's frame, every `period`); `cores` / `isrs` restrict
+#                         which clients a deadline applies to (shared blocks)
+# links     data-flow arrows between nodes (chains).
+# macros    how a register access looks in the code.  Simple lists use block_arg / reg_arg
+#           (HW_WR(<block>, <reg>, v)); `custom` registers any other layout, a fixed block or a block
+#           derived from the register name.  `auto_detect_volatile` adds macros whose #define body
+#           dereferences a volatile pointer.
+# block_aliases   names used in code -> block ids (matching is also case-insensitive).
+depth: 2
+default_line: hw_ctrl
+
+macros:
+  read:  [HW_RD, HW_POLL]          # HW_POLL busy-waits on a register: a read in a loop
+  write: [HW_WR]
+  rmw:   [HW_RMW]
+  block_arg: 0
+  reg_arg: 1
+  auto_detect_volatile: true
+  custom:                          # any argument layout: REGISTER_READ(STATUS, , DFE_RX) -> read DFE_RX.STATUS
+    - { name: REGISTER_READ, kind: read, reg_arg: 0, block_arg: 2 }
+    # - { name: RXF_WR, kind: write, block: RXF, reg_arg: 0 }                      fixed block
+    # - { name: REG_WR, kind: write, reg_arg: 0, block_from_reg: "^([A-Z0-9]+)_" } block from the register name
+block_aliases: { rxf: DFE_RX, dfe_rx: DFE_RX }
+
+nodes:
+  - id: control
+    name: "Control & transport"
+    kind: group
+    children:
+      - { id: TIMER, name: "Frame timer", base: 0x50000000, line: hw_ctrl, regs: [SFN, SLOT, SYM, CMP0, CMP1, CORR],
+          deadline: { at: "13.8 symbol", period: "1 slot", note: "next compare armed before the slot boundary" } }
+      - { id: MBOX,  name: "MAC mailbox", base: 0x50001000, line: hw_ctrl, regs: [TX, RX, STATUS, IRQ_CLR],
+          deadline: { at: "2.0 symbol", period: "1 slot", note: "MAC messages consumed / indicated early in the slot" } }
+      - { id: DMA,   name: "TB DMA",      base: 0x50002000, line: hw_ctrl, regs: [SRC, DST, LEN, CTRL, STATUS] }
+
+  - id: rf
+    name: "RF"
+    kind: group
+    children:
+      - id: RFIC
+        name: "RF transceiver"
+        base: 0x50003000
+        line: hw_rx
+        regs: [RSSI, RX_GAIN, TX_GAIN, AFC, TA, TX_GATE, PA_CTRL]
+        deadlines:
+          - { at: "0.55 symbol", period: "1 symbol", cores: [1], note: "AGC gain before the next RX symbol" }
+          - { timing: hw_tx, at: "0.7 symbol", period: "1 symbol", cores: [2], note: "TA / TX gate / power before the TX symbol" }
+          - { at: "9.0 symbol", period: "1 slot", cores: [3], note: "AFC update once per slot" }
+
+  - id: rx_chain
+    name: "RX chain (HW REF RX)"
+    kind: chain
+    children:
+      - { id: DFE_RX, name: "RX digital front end", base: 0x50010000, line: hw_rx, regs: [CTRL, DCOC, IQCORR, DECIM, START],
+          deadline: { at: "0.35 symbol", period: "1 symbol" } }
+      - { id: FFT,    name: "FFT",                  base: 0x50011000, line: hw_rx, regs: [CTRL, SIZE, CP_LEN, START, STATUS],
+          deadline: { at: "0.5 symbol", period: "1 symbol", note: "kick before the symbol's samples are complete" } }
+      - { id: CHEST,  name: "Channel estimator",    base: 0x50012000, line: hw_rx, regs: [CTRL, DMRS_CFG, START, STATUS, NOISE, TO_EST, FO_EST],
+          deadline: { at: "0.9 symbol", period: "1 symbol" } }
+      - { id: EQ,     name: "Equalizer (MMSE)",     base: 0x50013000, line: hw_rx, regs: [CTRL, MODE, START, STATUS],
+          deadline: { at: "13.95 symbol", period: "1 slot" } }
+      - { id: DEMAP,  name: "Demapper / LLR",       base: 0x50014000, line: hw_rx, regs: [CTRL, MOD_ORDER, LLR_SCALE, START, STATUS],
+          deadline: { at: "14.1 symbol", period: "1 slot" } }
+      - { id: DESCR,  name: "Descrambler",          base: 0x50015000, line: hw_rx, regs: [CTRL, SEED, START],
+          deadline: { at: "14.2 symbol", period: "1 slot" } }
+      - { id: RDM,    name: "Rate de-matcher",      base: 0x50016000, line: hw_rx, regs: [CTRL, RV, START, STATUS],
+          deadline: { at: "14.4 symbol", period: "1 slot" } }
+      - { id: HARQ_BUF, name: "HARQ soft buffer",   base: 0x50017000, line: hw_rx, regs: [BASE_ADDR, CTRL, COMBINE, FLUSH],
+          deadline: { at: "14.4 symbol", period: "1 slot" } }
+      - { id: LDPC_DEC, name: "LDPC decoder",       base: 0x50018000, line: hw_rx, regs: [CTRL, BG, ITER_MAX, START, STATUS, ITER_CNT],
+          deadline: { at: "14.9 symbol", period: "1 slot", note: "decode must start by 0.9 sym of the next slot to meet HARQ-ACK k1" } }
+      - { id: CRC,    name: "CRC",                  base: 0x50019000, line: hw_rx, regs: [CTRL, START, RESULT],
+          deadline: { at: "15.9 symbol", period: "1 slot" } }
+
+  - id: decoders
+    name: "Control-channel decoders"
+    kind: group
+    children:
+      - id: POLAR
+        name: "Polar decoder (PDCCH / PBCH)"
+        base: 0x5001A000
+        line: hw_rx
+        regs: [CTRL, LIST_SIZE, START, STATUS, OUT]
+        deadlines:
+          - { at: "3.1 symbol", period: "1 slot", cores: [1], note: "DCI out in time for same-slot PDSCH / L1C" }
+          - { at: "6.0 symbol", period: "10 slot", cores: [3], note: "PBCH within the SSB half frame" }
+
+  - id: meas_hw
+    name: "Measurement engines"
+    kind: group
+    children:
+      - { id: CSIRS,  name: "CSI-RS engine",   base: 0x5001B000, line: hw_rx, regs: [CTRL, CFG, START, STATUS, RSRP],
+          deadline: { at: "6.5 symbol", period: "5 slot" } }
+      - { id: SSB,    name: "SSB correlator",  base: 0x5001C000, line: hw_rx, regs: [CTRL, PSS_START, SSS_START, STATUS, PEAK],
+          deadline: { at: "5.0 symbol", period: "10 slot" } }
+
+  - id: tx_chain
+    name: "TX chain (HW REF TX)"
+    kind: chain
+    children:
+      - { id: ULENC,   name: "UL encoder (CRC/LDPC/RM/scr/mod)", base: 0x50020000, line: hw_tx, regs: [CTRL, BG, TBS, RV, SCR_SEED, MOD_ORDER, START, STATUS],
+          deadline: { at: "13.2 symbol", period: "1 slot", note: "encoded before the slot boundary" } }
+      - { id: UCI_ENC, name: "UCI encoder",         base: 0x50021000, line: hw_tx, regs: [CTRL, LEN, START, STATUS],
+          deadline: { at: "12.8 symbol", period: "1 slot" } }
+      - { id: SRS,     name: "SRS generator",       base: 0x50022000, line: hw_tx, regs: [CTRL, SEQ, START],
+          deadline: { at: "13.5 symbol", period: "5 slot" } }
+      - { id: MAP,     name: "RE mapper",           base: 0x50023000, line: hw_tx, regs: [CTRL, PRB_START, PRB_LEN, DMRS_POS, START],
+          deadline: { at: "13.6 symbol", period: "1 slot" } }
+      - { id: IFFT,    name: "IFFT",                base: 0x50024000, line: hw_tx, regs: [CTRL, SIZE, CP_LEN, START, STATUS],
+          deadline: { at: "0.5 symbol", period: "1 symbol" } }
+      - { id: DFE_TX,  name: "TX digital front end", base: 0x50025000, line: hw_tx, regs: [CTRL, UPSAMP, DPD, START],
+          deadline: { at: "0.6 symbol", period: "1 symbol" } }
+
+links:                         # data flow (arrows); kind is free text: data | control | dma
+  - { from: RFIC,   to: DFE_RX, kind: data, label: "I/Q" }
+  - { from: DFE_RX, to: FFT }
+  - { from: FFT,    to: CHEST }
+  - { from: CHEST,  to: EQ }
+  - { from: EQ,     to: DEMAP }
+  - { from: DEMAP,  to: DESCR }
+  - { from: DESCR,  to: RDM }
+  - { from: RDM,    to: HARQ_BUF }
+  - { from: HARQ_BUF, to: LDPC_DEC }
+  - { from: LDPC_DEC, to: CRC }
+  - { from: CRC,    to: DMA, kind: dma, label: "TB" }
+  - { from: DMA,    to: MBOX, kind: control, label: "indication" }
+  - { from: DEMAP,  to: POLAR, kind: data, label: "CORESET LLRs" }
+  - { from: FFT,    to: CSIRS }
+  - { from: FFT,    to: SSB }
+  - { from: SSB,    to: POLAR, kind: data, label: "PBCH" }
+  - { from: ULENC,  to: MAP }
+  - { from: UCI_ENC, to: MAP }
+  - { from: SRS,    to: MAP }
+  - { from: MAP,    to: IFFT }
+  - { from: IFFT,   to: DFE_TX }
+  - { from: DFE_TX, to: RFIC, kind: data, label: "I/Q" }
+  - { from: TIMER,  to: RFIC, kind: control, label: "symbol strobe" }

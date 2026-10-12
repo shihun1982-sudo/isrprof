@@ -1,0 +1,110 @@
+# timing.yaml - the 3D timing diagram (middle overlay).
+#
+#   x (diagonal) : cores          - `cores[]`; add / rename / remove freely, each core is one plane
+#   y (horizontal): time          - NW slot / symbol grid from `numerology`; `channels` draws the 3GPP
+#                                   channel allocation (PDCCH / PDSCH / PUCCH / PUSCH / SSB / CSI-RS ...)
+#                                   on the allocated symbols; `references` are the vertical dashed lines
+#                                   (DL RTG, UL RTG, HW REF ...) placed at NW +- offset
+#   z (vertical)  : ISRs          - `isrs[]`: the interrupts of one slot and the SW blocks they run; each
+#                                   ISR is placed on a reference line with `start` / `length` in symbols
+#                                   (start 0.7 on dl_rtg = 0.7 symbols after the DL RTG line of the slot)
+#
+# Time expressions: "1.2 symbol", "0.5 slot", "-30 us", "2 ms", "1 subframe" (bare numbers = symbols).
+numerology:
+  mu: 1                        # 30 kHz SCS -> slot = 500 us, symbol ~ 35.7 us
+  symbols_per_slot: 14
+  # symbol_us: 35.71           # override when exact CP handling matters
+
+cores:                         # x axis - any number of cores
+  - { id: 0, name: "Core0 L1C",   clock_mhz: 800,  description: "frame timer, slot scheduler, MAC mailbox" }
+  - { id: 1, name: "Core1 DLPHY", clock_mhz: 1200, description: "RX chain: RFIC -> DFE -> FFT -> CHEST -> EQ -> DEMAP -> DESCR -> RDM/HARQ -> LDPC -> CRC" }
+  - { id: 2, name: "Core2 ULPHY", clock_mhz: 1200, description: "TX chain: ULENC / UCI / SRS -> MAP -> IFFT -> DFE_TX -> RFIC" }
+  - { id: 3, name: "Core3 MEAS",  clock_mhz: 600,  description: "TTL / FTL tracking, CSI-RS, SSB search" }
+
+references:                    # y axis - reference lines, all NW +- offset (dashed verticals, repeated per slot)
+  - { id: nw,        name: "NW timing",      offset: "0 symbol",     kind: ref, priority: 0, description: "gNB frame timing as seen by the UE" }
+  - { id: slot_tick, name: "Slot tick",      offset: "-1 symbol",    kind: sw,  priority: 1, description: "pre-slot scheduling tick on L1C" }
+  - { id: dl_rtg,    name: "DL RTG",         offset: "-0.3 symbol",  kind: sw,  priority: 2, description: "DL receive timing = NW - FFT window shift" }
+  - { id: dl_hi,     name: "DL RTG (hi-prio)", offset: "-0.3 symbol", kind: sw, priority: 3, description: "same timebase as DL RTG, higher interrupt priority" }
+  - { id: ul_rtg,    name: "UL RTG (TA)",    offset: "+2 symbol",    kind: sw,  priority: 4, description: "UL transmit timing = NW + timing advance" }
+  - { id: meas,      name: "MEAS timing",    offset: "-0.3 symbol",  kind: sw,  priority: 5, description: "measurement core follows DL timing, lowest priority" }
+  - { id: hw_rx,     name: "HW REF RX",      offset: "-0.45 symbol", kind: hw,  description: "RX datapath timing (FFT window start)" }
+  - { id: hw_tx,     name: "HW REF TX",      offset: "+1.8 symbol",  kind: hw,  description: "TX datapath timing (DAC) = UL RTG - analog delay" }
+  - { id: hw_ctrl,   name: "HW REF CTRL",    offset: "0 symbol",     kind: hw,  description: "timer / mailbox / DMA on NW timing" }
+
+channels:                      # y axis - 3GPP channel allocation drawn under the slot / symbol grid
+  tdd_pattern: "DDDSU"         # slot pattern (D = downlink, S = special, U = uplink); empty = FDD (every slot is dl+ul)
+  special: { dl: 10, gap: 2, ul: 2 }   # special-slot split (symbols)
+  items:                       # symbols: [start, length]; slots: all | dl | ul | special | [indices] (+ period_slots)
+    - { id: PDCCH,  dir: dl, symbols: [0, 2],  slots: dl,      note: "CORESET on the first two symbols" }
+    - { id: PDSCH,  dir: dl, symbols: [2, 12], slots: dl }
+    - { id: PDSCH_S, name: PDSCH, dir: dl, symbols: [2, 8], slots: special, note: "DL part of the special slot" }
+    - { id: PDCCH_S, name: PDCCH, dir: dl, symbols: [0, 2], slots: special }
+    - { id: PUSCH,  dir: ul, symbols: [0, 12], slots: ul }
+    - { id: PUCCH,  dir: ul, symbols: [12, 2], slots: ul,      note: "short PUCCH on the last two symbols" }
+    - { id: PUCCH_S, name: PUCCH, dir: ul, symbols: [12, 2], slots: special }
+    - { id: SRS,    dir: ul, symbols: [13, 1], slots: ul, period_slots: 5, offset_slot: 4 }
+    - { id: SSB,    dir: dl, symbols: [2, 4],  slots: [0, 1], period_slots: 20, note: "SSB burst (case C), half-frame" }
+    - { id: CSI-RS, dir: dl, symbols: [4, 1],  slots: [2], period_slots: 5 }
+
+isrs:                          # z axis - interrupts of a slot and the SW blocks they run
+  # core 0 L1C
+  - { name: SLOT_TICK_ISR, core: 0, timing: slot_tick, entry: slot_tick_isr, start: "0 symbol",   length: "0.9 symbol", period: "1 slot",  priority: 2 }
+  - { name: MBOX_ISR,      core: 0, timing: nw,        entry: mbox_isr,      start: "0.5 symbol", length: "0.6 symbol", period: "1 slot",  priority: 1, description: "MAC -> L1 message (UL TB / config)" }
+  - { name: L1C_IPC_ISR,   core: 0, timing: nw,        entry: l1c_ipc_isr,   start: "3.2 symbol", length: "0.6 symbol", period: "1 slot",  priority: 1, description: "DCI from DL core, measurement reports" }
+  # core 1 DL PHY
+  - { name: DL_SYMBOL_ISR, core: 1, timing: dl_rtg, entry: dl_symbol_isr, start: "0 symbol",    length: "0.5 symbol", period: "1 symbol", priority: 3 }
+  - { name: DL_PDCCH_ISR,  core: 1, timing: dl_hi,  entry: dl_pdcch_isr,  start: "2.2 symbol",  length: "1.6 symbol", period: "1 slot",   priority: 5, description: "CORESET through the FFT -> blind decode" }
+  - { name: DL_PDSCH_ISR,  core: 1, timing: dl_hi,  entry: dl_pdsch_isr,  start: "13.3 symbol", length: "3.2 symbol", period: "1 slot",   priority: 4, description: "last PDSCH symbol in -> decode pipeline" }
+  # core 2 UL PHY
+  - { name: UL_SYMBOL_ISR,  core: 2, timing: ul_rtg, entry: ul_symbol_isr,  start: "0 symbol",    length: "0.45 symbol", period: "1 symbol", priority: 3 }
+  - { name: UL_TX_PREP_ISR, core: 2, timing: ul_rtg, entry: ul_tx_prep_isr, start: "9.5 symbol",  length: "2.8 symbol",  period: "1 slot",   priority: 4, description: "PUSCH for the next slot" }
+  - { name: UL_PUCCH_ISR,   core: 2, timing: ul_rtg, entry: ul_pucch_isr,   start: "11.0 symbol", length: "1.0 symbol",  period: "1 slot",   priority: 4 }
+  - { name: UL_SRS_ISR,     core: 2, timing: ul_rtg, entry: ul_srs_isr,     start: "12.5 symbol", length: "0.6 symbol",  period: "5 slot",   priority: 2 }
+  # core 3 MEAS
+  - { name: TRACK_ISR, core: 3, timing: dl_rtg, entry: track_isr, start: "7.0 symbol", length: "0.8 symbol", period: "1 slot",  priority: 2, description: "TTL / FTL from the DMRS channel estimate" }
+  - { name: CSIRS_ISR, core: 3, timing: meas,   entry: csirs_isr, start: "4.0 symbol", length: "1.6 symbol", period: "5 slot",  priority: 1 }
+  - { name: SSB_ISR,   core: 3, timing: meas,   entry: ssb_isr,   start: "0 symbol",   length: "4.0 symbol", period: "10 slot", priority: 1, description: "SSB half-frame: PSS/SSS, PBCH, cell measurement" }
+
+window: { start: "-1 symbol", end: "12 slot" }   # visible time range (NW frame); periodic ISRs repeat across it
+
+callgraph: { max_depth: 24 }
+
+cost_model:                    # self time per function: trace CSV > config (exact, then globs) > LLM > default
+  source_priority: [trace, config, llm, default]
+  # trace_file: traces/isr_costs.csv        # columns: function,us   (or function,cycles,clock_mhz)
+  default_cost: "0.03 symbol"
+  external_cost: "0.01 symbol"
+  function_costs:
+    drv_polar_decode: "0.22 symbol"
+    drv_pbch_polar_decode: "0.4 symbol"
+    drv_ulenc_run: "0.6 symbol"
+    drv_uci_encode: "0.15 symbol"
+    drv_csirs_read_rsrp: "0.5 symbol"
+    drv_ssb_sss_detect: "1.5 symbol"
+    drv_ldpc_poll: "0.02 symbol"
+    hal_ldpc_wait: "0.5 symbol"
+    stage_ldpc_decode: "0.3 symbol"
+    pdcch_blind_decode: "0.2 symbol"
+    pool_alloc: "0.2 symbol"
+    ul_encode_tb: "0.1 symbol"
+    ul_dmrs_gen: "0.15 symbol"
+    sched_pick_ul: "0.1 symbol"
+    sched_tpc_ta: "0.08 symbol"
+    l1c_harq_tick: "0.08 symbol"
+    csi_compute_report: "0.2 symbol"
+    sync_measure_cell: "0.1 symbol"
+    "*_isr": "0.03 symbol"
+    "drv_*": "0.04 symbol"
+    "hal_*": "0.02 symbol"
+    "timer_*": "0.05 symbol"
+    "sched_*": "0.08 symbol"
+    "mac_if_*": "0.06 symbol"
+    "l1c_*": "0.05 symbol"
+    "stage_*": "0.06 symbol"
+    "pdcch_*": "0.08 symbol"
+    "dl_*": "0.05 symbol"
+    "ul_*": "0.06 symbol"
+    "sync_*": "0.1 symbol"
+    "csi_*": "0.1 symbol"
+    "ipc_*": "0.04 symbol"

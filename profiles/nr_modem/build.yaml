@@ -1,0 +1,30 @@
+# build.yaml - where the sources are and how they are built.
+#
+# root        source root; `files:` globs in sw_structure.yaml and layer file globs are relative to it,
+#             and file names in the viewer are shown relative to it.
+# sources     globs (relative to root) parsed by the builtin C front-end; headers are needed for the
+#             register / accessor macro definitions and the shared-memory declarations.
+# cmake       recorded with the profile; `build_dir` is where compile_commands.json is looked for.
+# compile_commands  when present, its translation units define the parsed .c files (headers still come
+#             from `sources`) and the -D / -I flags are collected per file.  Nothing is ever executed.
+# build_command  recorded only (the resolved profile lists it next to the outputs).
+# cache       per-file parse cache under <output>/.cache (re-runs on a big tree only re-parse changed files).
+root: ../../examples/nr_modem
+sources:
+  - "**/*.c"
+  - "**/*.h"
+exclude:
+  - "build/**"
+cmake:
+  source_dir: .
+  build_dir: build
+  configure: "cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+build_command: "cmake --build build"
+compile_commands: build/compile_commands.json
+defines:
+  CONFIG_NR_MU: 1
+  CONFIG_NUM_CORES: 4
+parser:
+  backend: builtin             # builtin | libclang (plug-in: isrprof/clang_backend.py)
+  ignore_calls: [sizeof, memcpy, memset, ASSERT, irq_lock, irq_unlock, HW_REG]
+cache: true

@@ -479,17 +479,17 @@ class CParser:
             name = None
             depth = 0
             for k, t in enumerate(d):
-                if t.text in "([{":
-                    depth += 1
-                elif t.text in ")]}":
-                    depth -= 1
-                if depth == 0 and t.text in ("=", "[") :
-                    # name is last id before this
+                if depth == 0 and t.text in ("=", "["):
+                    # `type name = ...` / `type name[N]`: the name is the last identifier before this token
                     for b in range(k - 1, -1, -1):
                         if d[b].kind == "id" and d[b].text not in KEYWORDS:
                             name = d[b]
                             break
                     break
+                if t.text in "([{":
+                    depth += 1
+                elif t.text in ")]}":
+                    depth -= 1
             if name is None:
                 # last identifier in declarator that isn't a keyword
                 ids = [t for t in d if t.kind == "id" and t.text not in KEYWORDS]
@@ -531,17 +531,71 @@ class CParser:
                         end_line=toks[end].line, is_static=any(t.text == "static" for t in header),
                         signature=_join(header)[:160],
                     )
-                    self._scan_body(fd, toks[i + 1:end])
+                    self._scan_body(fd, toks[i + 1:end], header)
                     self.result.functions.append(fd)
                 i = end + 1
             else:
                 i += 1
 
-    def _scan_body(self, fd: FunctionDef, body: list[Tok]):
+    def _param_names(self, header: list[Tok]) -> set[str]:
+        """Parameter names of a function header: the last identifier of every top-level comma-separated
+        group inside the outermost parentheses (`const dl_grant_t *g, uint8_t sym[2]` -> {g, sym})."""
+        out: set[str] = set()
+        if not header:
+            return out
+        depth, start = 0, None
+        for k, t in enumerate(header):
+            if t.text == "(":
+                if depth == 0:
+                    start = k
+                depth += 1
+            elif t.text == ")":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    for grp in _split_args(header[start + 1:k]):
+                        ids = [x.text for x in grp if x.kind == "id" and x.text not in KEYWORDS]
+                        if len(ids) >= 2:              # `type name`; a lone identifier is a type (void, or a typedef)
+                            out.add(ids[-1])
+                    start = None
+        return out
+
+    def _local_decls(self, body: list[Tok]) -> set[str]:
+        """Names declared by `type [*] name [= ...] ;|,|[` statements (and `for (type name = ...`), so a local
+        that shares its name with a global is not counted as a global access."""
+        out: set[str] = set()
+        n = len(body)
+        i = 0
+        while i < n:
+            t = body[i]
+            at_start = i == 0 or body[i - 1].text in (";", "{", "}") or (body[i - 1].text == "(" and i >= 2 and body[i - 2].text == "for")
+            if at_start and t.kind == "id" and t.text not in KEYWORDS - TYPE_KEYWORDS or (at_start and t.text in TYPE_KEYWORDS):
+                k = i
+                parts = 0                      # type words (keywords or identifiers) before the name
+                last: str | None = None
+                while k < n and (body[k].kind == "id" or body[k].text == "*"):
+                    if body[k].kind == "id":
+                        if body[k].text in KEYWORDS and body[k].text not in TYPE_KEYWORDS:
+                            break              # if / return / sizeof ...: not a declaration
+                        parts += 1
+                        last = None if body[k].text in KEYWORDS else body[k].text
+                    k += 1
+                nxt = body[k].text if k < n else ""
+                if parts >= 2 and last is not None and nxt in ("=", ";", ",", "["):
+                    out.add(last)
+                    while k < n and body[k].text != ";":      # further declarators: `int a = 1, b;`
+                        if body[k].text == "," and k + 1 < n and body[k + 1].kind == "id":
+                            out.add(body[k + 1].text)
+                        k += 1
+                    i = k
+                    continue
+            i += 1
+        return out
+
+    def _scan_body(self, fd: FunctionDef, body: list[Tok], header: list[Tok] | None = None):
         file_statics = self._file_statics.get(fd.file, {})
         seq = 0
         n = len(body)
-        local_names: set[str] = set()
+        local_names: set[str] = self._param_names(header or []) | self._local_decls(body)
         # collect static locals + plain local declarations (to avoid false global hits)
         i = 0
         while i < n:

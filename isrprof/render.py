@@ -1,8 +1,9 @@
 """Emit the single-file HTML viewer with the profile JSON embedded.
 
 The viewer source lives in ``templates/parts``: ``*.html`` parts (title/CSS, markup, data slot) are
-concatenated in name order, followed by the ``*.js`` parts wrapped in one IIFE.  Keeping the JS in
-small files makes the viewer easy to extend without touching one giant template.
+concatenated in name order, followed by the ``*.js`` parts wrapped in one IIFE.  ``templates/vendor``
+holds three.js, which is inlined so the output works offline.  Keeping the JS in small files makes the
+viewer easy to extend without touching one giant template.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import json
 import os
 
 PARTS_DIR = os.path.join(os.path.dirname(__file__), "templates", "parts")
+VENDOR_DIR = os.path.join(os.path.dirname(__file__), "templates", "vendor")
 
 STANDALONE_HEAD = (
     "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
@@ -19,14 +21,28 @@ STANDALONE_HEAD = (
 )
 STANDALONE_TAIL = "\n</body>\n</html>\n"
 
+_TEMPLATE_CACHE: dict[str, str] = {}
+
 
 def assemble_template() -> str:
+    if "tpl" in _TEMPLATE_CACHE:
+        return _TEMPLATE_CACHE["tpl"]
     html, js = [], []
     for name in sorted(os.listdir(PARTS_DIR)):
         with open(os.path.join(PARTS_DIR, name), "r", encoding="utf-8") as fh:
             txt = fh.read()
         (js if name.endswith(".js") else html).append(txt)
-    return "\n".join(html) + "\n<script>\n(function () {\n'use strict';\n" + "\n".join(js) + "\n})();\n</script>\n"
+    vendor = []
+    if os.path.isdir(VENDOR_DIR):
+        for name in sorted(os.listdir(VENDOR_DIR)):
+            if name.endswith(".js"):
+                with open(os.path.join(VENDOR_DIR, name), "r", encoding="utf-8") as fh:
+                    vendor.append(fh.read())
+    tpl = "\n".join(html)
+    tpl = tpl.replace("__VENDOR_JS__", "<script>\n" + "\n".join(vendor) + "\n</script>" if vendor else "")
+    tpl += "\n<script>\n(function () {\n'use strict';\n" + "\n".join(js) + "\n})();\n</script>\n"
+    _TEMPLATE_CACHE["tpl"] = tpl
+    return tpl
 
 
 def render_html(profile: dict, fragment: bool = False) -> str:

@@ -1,0 +1,97 @@
+[
+ {
+  "directory": ".",
+  "file": "common/shared_mem.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c common/shared_mem.c -o build/shared_mem.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_chest.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_chest.c -o build/dl_chest.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_drv.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_drv.c -o build/dl_drv.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_fe.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_fe.c -o build/dl_fe.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_isr.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_isr.c -o build/dl_isr.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_pdcch.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_pdcch.c -o build/dl_pdcch.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/dl_pdsch.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c dl/dl_pdsch.c -o build/dl_pdsch.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "l1c/l1c_mac_if.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c l1c/l1c_mac_if.c -o build/l1c_mac_if.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "l1c/l1c_sched.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c l1c/l1c_sched.c -o build/l1c_sched.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "l1c/l1c_timer.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c l1c/l1c_timer.c -o build/l1c_timer.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "meas/csi.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c meas/csi.c -o build/csi.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "meas/meas_drv.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c meas/meas_drv.c -o build/meas_drv.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "meas/meas_isr.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c meas/meas_isr.c -o build/meas_isr.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "meas/sync.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c meas/sync.c -o build/sync.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/ul_drv.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c ul/ul_drv.c -o build/ul_drv.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/ul_fe.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c ul/ul_fe.c -o build/ul_fe.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/ul_isr.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c ul/ul_isr.c -o build/ul_isr.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/ul_pucch.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c ul/ul_pucch.c -o build/ul_pucch.c.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/ul_pusch.c",
+  "command": "cc -DCONFIG_NR_MU=1 -DCONFIG_NUM_CORES=4 -I. -Ihal -Icommon -O2 -c ul/ul_pusch.c -o build/ul_pusch.c.o"
+ }
+]

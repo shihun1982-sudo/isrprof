@@ -1,0 +1,182 @@
+# sw_structure.yaml - the SW structure diagram (top overlay).
+#
+# nodes      the hierarchy drawn as nested boxes down to `depth` (adjustable in the viewer).  Kinds are
+#            free text used for styling: subsystem, module, class, struct, shared_memory, group, table,
+#            variable.  A node links to the code through
+#              files:      file globs (relative to build.root) -> every function in them belongs to the node
+#              functions:  function-name globs (for code that lives in shared files)
+#              variables:  global / static / registered variable names the node stands for
+#            `core:` is inherited by children; nodes with `files` define the module -> core map used by
+#            the timing diagram.  Files that no node claims are shown under an implicit
+#            "<core> | files without SW node" box, cross-core globals no node declares under
+#            "Shared memory | detected" (auto_variables: cross_core | all | none).
+# relations  arrows between nodes (design-level); IPC relations are added automatically from the
+#            IPC primitives in `touch.ipc`.
+# touch      what counts as a touch and how it is detected: registered globals (tracked even when the
+#            definition is outside the sources), accessor macros (ASA_GET(dl.x) -> read ASA.dl.x), heap
+#            functions, IPC macros + channel argument + channels (sender / receiver core).
+# architecture  Structure101-style layers (top -> bottom; calls must go down) and deny rules.
+depth: 3
+auto_variables: cross_core
+
+nodes:
+  - id: l1c
+    name: "L1 Control"
+    kind: subsystem
+    core: 0
+    note: "frame timer, slot scheduler, MAC mailbox (core 0)"
+    children:
+      - { id: l1c_timer, name: "Frame timer", kind: module, files: ["l1c/l1c_timer.c"] }
+      - id: l1c_sched
+        name: "Slot scheduler"
+        kind: module
+        files: ["l1c/l1c_sched.c", "l1c/l1c_sched.h"]
+        children:
+          - { id: harq_tables, name: "HARQ tables", kind: struct, type: harq_entry_t, variables: [s_dl_harq, s_ul_harq] }
+      - { id: l1c_mac_if, name: "MAC interface", kind: module, files: ["l1c/l1c_mac_if.c"] }
+
+  - id: dlphy
+    name: "DL PHY"
+    kind: subsystem
+    core: 1
+    note: "RX chain control: symbol ISR, PDCCH, PDSCH pipeline (core 1)"
+    children:
+      - { id: dl_isr,   name: "DL ISR entries",  kind: module, files: ["dl/dl_isr.c"] }
+      - id: dl_fe
+        name: "DL front end"
+        kind: module
+        files: ["dl/dl_fe.c"]
+        children:
+          - { id: agc_loop, name: "AGC loop state", kind: struct, type: agc_t, variables: [s_agc] }
+      - { id: dl_chest, name: "Channel estimation", kind: module, files: ["dl/dl_chest.c"] }
+      - { id: dl_pdcch, name: "PDCCH decode",       kind: module, files: ["dl/dl_pdcch.c"] }
+      - id: dl_pdsch
+        name: "PDSCH pipeline"
+        kind: module
+        files: ["dl/dl_pdsch.c"]
+        children:
+          - { id: pdsch_stages, name: "Stage table", kind: table, type: pdsch_stage_t, variables: [k_pdsch_stages],
+              note: "function-pointer dispatch table: EQ -> DEMAP -> DESCR -> RDM -> LDPC -> CRC -> deliver" }
+      - { id: dl_drv, name: "DL drivers", kind: module, files: ["dl/dl_drv.c", "dl/dl_drv.h", "dl/dl_phy.h"] }
+
+  - id: ulphy
+    name: "UL PHY"
+    kind: subsystem
+    core: 2
+    note: "TX chain control: symbol ISR, PUSCH / PUCCH / SRS preparation (core 2)"
+    children:
+      - { id: ul_isr,   name: "UL ISR entries", kind: module, files: ["ul/ul_isr.c"] }
+      - { id: ul_fe,    name: "UL front end",   kind: module, files: ["ul/ul_fe.c"] }
+      - id: ul_pusch
+        name: "PUSCH prep"
+        kind: module
+        files: ["ul/ul_pusch.c"]
+        children:
+          - { id: dmrs_table, name: "DMRS table", kind: struct, variables: [s_dmrs_table] }
+      - { id: ul_pucch, name: "PUCCH / SRS",    kind: module, files: ["ul/ul_pucch.c"] }
+      - { id: ul_drv,   name: "UL drivers",     kind: module, files: ["ul/ul_drv.c", "ul/ul_drv.h", "ul/ul_phy.h"] }
+
+  - id: meas
+    name: "Measurement / sync"
+    kind: subsystem
+    core: 3
+    children:
+      - { id: meas_isr, name: "MEAS ISR entries", kind: module, files: ["meas/meas_isr.c"] }
+      - { id: sync,     name: "TTL / FTL / SSB",  kind: module, files: ["meas/sync.c"] }
+      - { id: csi,      name: "CSI reporting",    kind: module, files: ["meas/csi.c"] }
+      - { id: meas_drv, name: "MEAS drivers",     kind: module, files: ["meas/meas_drv.c", "meas/meas_drv.h", "meas/meas.h"] }
+
+  - id: platform
+    name: "Platform"
+    kind: subsystem
+    core: 0
+    children:
+      - id: common
+        name: "Shared memory primitives (IPC, pool)"
+        kind: module
+        files: ["common/*", "hal/*"]
+        children:
+          - { id: ipc_queues, name: "IPC sequence counters", kind: struct, variables: [s_ipc_seq] }
+          - { id: pool, name: "Block pool", kind: struct, variables: [s_pool_mem, s_pool_head] }
+
+  - id: shm
+    name: "Shared memory (SRAM)"
+    kind: shared_memory
+    note: "written / read across cores; see the arrows for the producer -> consumer direction"
+    children:
+      - id: timing_grants
+        name: "Timing & grants"
+        kind: group
+        children:
+          - { id: g_nw_timing, kind: struct, type: nw_timing_t, variables: [g_nw_timing], note: "core 0 -> all" }
+          - { id: g_dl_grant,  kind: struct, type: dl_grant_t,  variables: [g_dl_grant],  note: "core 1 DCI -> core 1 PDSCH, core 0" }
+          - { id: g_ul_grant,  kind: struct, type: ul_grant_t,  variables: [g_ul_grant],  note: "core 0 -> core 2" }
+      - id: harq_io
+        name: "HARQ"
+        kind: group
+        children:
+          - { id: g_dl_harq_ack, kind: struct, type: harq_ack_t, variables: [g_dl_harq_ack], note: "core 1 -> core 2 (PUCCH), core 0" }
+          - { id: g_harq_soft,   kind: variable, name: "g_harq_soft[]", variables: [g_harq_soft], note: "soft-bit buffers (heap)" }
+      - id: meas_io
+        name: "Measurements"
+        kind: group
+        children:
+          - { id: g_chest_result, kind: struct, type: chest_result_t, variables: [g_chest_result], note: "core 1 -> core 3" }
+          - { id: g_track_state,  kind: struct, type: track_state_t,  variables: [g_track_state],  note: "core 3 -> core 0, core 2" }
+          - { id: g_csi_report,   kind: struct, type: csi_report_t,   variables: [g_csi_report],   note: "core 3 -> core 2" }
+          - { id: g_meas_result,  kind: struct, type: meas_result_t,  variables: [g_meas_result],  note: "core 3 -> core 0" }
+          - { id: g_rf_state,     kind: struct, type: rf_state_t,     variables: [g_rf_state],     note: "core 1 AGC -> core 2 TX power" }
+      - id: tb_queues
+        name: "Transport blocks"
+        kind: group
+        children:
+          - { id: g_ul_tb_queue, kind: struct, type: tb_desc_t, variables: [g_ul_tb_queue], note: "core 0 (MAC) -> core 2" }
+          - { id: g_dl_tb_out,   kind: struct, type: tb_desc_t, variables: [g_dl_tb_out],   note: "core 1 -> MAC" }
+      - { id: ASA, name: "ASA (Air-interface State Area)", kind: struct, variables: [ASA], registered: true,
+          note: "platform library structure; accessed directly (ASA.dl.x) and through ASA_GET / ASA_SET" }
+
+relations:                     # design-level arrows (kinds are free text: uses, dispatch, upcall, produces, consumes ...)
+  - { from: dl_pdsch, to: pdsch_stages, kind: dispatch, label: "k_pdsch_stages[i].run" }
+  - { from: dl_drv,   to: l1c_sched,    kind: upcall,   label: "hal_ldpc_wait -> sched_notify_late", note: "known smell: HAL calls up into control" }
+  - { from: dl_pdsch, to: l1c_mac_if,   kind: upcall,   label: "mac_if_indicate", note: "L1C module code executed on core 1" }
+  - { from: sync,      to: g_track_state, kind: produces }
+  - { from: l1c_timer, to: g_track_state, kind: consumes }
+  - { from: ul_fe,     to: g_track_state, kind: consumes }
+  - { from: dl_pdsch,  to: g_dl_harq_ack, kind: produces }
+  - { from: ul_pucch,  to: g_dl_harq_ack, kind: consumes }
+
+touch:
+  globals:                     # registered shared structures (tracked even when defined outside the sources)
+    - { name: ASA, kind: global, note: "Air-interface State Area, platform library" }
+  access_macros:               # accessor macros that read / write a registered variable
+    - { name: ASA_GET, rw: r, var: ASA, field_arg: 0 }    # ASA_GET(dl.agc_target_dbm)  -> read  ASA.dl.agc_target_dbm
+    - { name: ASA_SET, rw: w, var: ASA, field_arg: 0 }    # ASA_SET(dl.dcoc_overflow, 1) -> write ASA.dl.dcoc_overflow
+    # - { name: SHM_WR, rw: w, var_arg: 0, field_arg: 1 } # variable name taken from an argument
+  heap_functions: [malloc, calloc, pool_alloc, pool_free]
+  ignore_vars: []
+  ipc:
+    macros: [IPC_SEND, IPC_RECV]
+    channel_arg: 0
+    channels:
+      - { id: CH_MAC_TO_L1,   from: 0, to: 0 }
+      - { id: CH_L1_TO_MAC,   from: 0, to: 0 }
+      - { id: CH_L1C_TO_DL,   from: 0, to: 1 }
+      - { id: CH_L1C_TO_UL,   from: 0, to: 2 }
+      - { id: CH_DL_TO_L1C,   from: 1, to: 0 }
+      - { id: CH_DL_TO_UL,    from: 1, to: 2 }
+      - { id: CH_MEAS_TO_L1C, from: 3, to: 0 }
+      - { id: CH_L1C_TO_MEAS, from: 0, to: 3 }
+
+architecture:
+  layers:                      # top -> bottom; calls must go downward
+    - { name: ISR,       functions: ["*_isr"] }
+    - { name: Control,   functions: ["l1c_*", "sched_*", "timer_*", "mac_if_*"] }
+    - { name: Pipeline,  functions: ["dl_*", "pdcch_*", "stage_*", "ul_*", "sync_*", "csi_*", "ipc_*", "pool_*"] }
+    - { name: Driver,    functions: ["drv_*"] }
+    - { name: HAL,       functions: ["hal_*"] }
+  rules:
+    - { name: "no heap in DL pipeline", deny: { from: "dl_*", to: "pool_alloc" } }
+    - { name: "no heap in MAC mailbox ISR path", deny: { from: "mac_if_*", to: "pool_alloc" } }
+  fat_threshold: 8
+  allow_skip_layer: true
+  include_unreached: false

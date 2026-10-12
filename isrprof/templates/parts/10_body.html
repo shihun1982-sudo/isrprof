@@ -4,78 +4,98 @@
   <nav class="tabs" role="tablist">
     <button class="tog" id="panels-collapse" title="collapse every window">▸ collapse all</button>
     <button class="tog" id="panels-expand" title="expand every window">▾ expand all</button>
-    <button role="tab" data-tab="timing" aria-selected="true">Timing 3D</button>
+    <button role="tab" data-tab="timing" aria-selected="true">Overview</button>
     <button role="tab" data-tab="structure" aria-selected="false">Structure (DSM)</button>
   </nav>
 </header>
 
 <details class="panel ctl" id="ctl-panel" open>
-<summary>Controls <span class="hint">cores · ISR · unit · call graph · focus · 3D time range</span></summary>
+<summary>Controls <span class="hint">cores · ISRs · slots · unit · focus · call-graph level · diagram depth — every window below resizes by dragging its bottom edge, the side column by dragging the splitter</span></summary>
 <div class="body controls">
-  <div class="group"><label>Cores</label><span id="core-toggles"></span></div>
-  <div class="group"><label for="isr-sel">ISR</label><select id="isr-sel" class="tog"></select></div>
+  <div class="group"><label>Cores</label><span id="core-toggles" class="checks"></span>
+    <button class="tog mini" id="cores-all" title="show every core">all</button></div>
+  <div class="group"><label>ISRs</label>
+    <details class="dd" id="isr-dd"><summary class="tog" id="isr-summary">all ISRs</summary>
+      <div class="dd-body"><div class="dd-tools"><input type="search" id="isr-filter" placeholder="filter…"><button class="tog mini" id="isr-all">all</button><button class="tog mini" id="isr-none">none</button></div><div id="isr-list" class="checks col"></div></div></details></div>
+  <div class="group"><label for="slot-from">Slots</label>
+    <button class="tog mini" id="slot-prev" title="previous slots">◂</button>
+    <span class="info">from</span><input type="number" id="slot-from" class="tog num" step="1" value="0" title="first NW slot shown">
+    <span class="info">count</span><input type="number" id="slot-count" class="tog num" min="1" step="1" value="5" title="number of slots shown">
+    <button class="tog mini" id="slot-next" title="next slots">▸</button>
+    <button class="tog" id="range-full" title="show the whole configured window">all</button>
+    <span id="range-info" class="info"></span></div>
+  <div class="group"><label>Reference lines</label><span id="ref-toggles" class="checks"></span><label class="chk"><input type="checkbox" id="dl-toggle" checked><i class="dash" style="background:var(--critical)"></i>HW deadlines</label></div>
+  <div class="group"><label for="overlap">Core overlap</label><input type="range" id="overlap" min="0" max="85" step="5" value="50" title="stacked view: how much each core plane covers the one behind it"><span id="overlap-v" class="info">50%</span></div>
   <div class="group"><label>Unit</label>
     <button class="tog" id="unit-sym" aria-pressed="true">symbol</button>
     <button class="tog" id="unit-us" aria-pressed="false">µs</button></div>
-  <div class="group"><label>Call graph</label>
-    <button class="tog" id="exp-all">Expand all</button>
-    <button class="tog" id="col-all">Collapse to ISR</button>
-    <button class="tog" id="inst-all" aria-pressed="false" title="draw the call subtree for every periodic instance, not only the selected one">all instances</button></div>
   <div class="group"><label>Focus</label>
     <button class="tog" id="focus-self" aria-pressed="false" title="relate only the selected function">this function only</button>
     <button class="tog" id="focus-deep" aria-pressed="true" title="relate the selected function plus every callee down to the leaves">include callees to leaves</button>
     <button class="tog" id="focus-clear" title="Esc">Clear</button>
     <span id="focus-info" class="info"></span></div>
-  <div class="group"><label>3D time range</label>
-    <span id="range-info" class="info"></span>
-    <button class="tog" id="range-full" title="show the whole configured window (drag on a timeline to zoom into a range)">Full window</button>
-    <label for="tscale">scale</label><input type="range" id="tscale" min="-2" max="3" step="0.5" value="0" title="stretch / compress the 3D time axis"></div>
+  <div class="group"><label for="level">Call graph level</label>
+    <button class="tog" id="lvl-dec" title="collapse one level">−</button>
+    <input type="number" id="level" class="tog num" min="0" max="30" step="1" value="2" title="call-tree levels expanded below the ISR entry (0 = entries only)">
+    <button class="tog" id="lvl-inc" title="expand one level">＋</button>
+    <button class="tog" id="exp-all">all levels</button>
+    <button class="tog" id="col-all">entries only</button>
+    <button class="tog" id="inst-all" aria-pressed="false" title="draw the call subtree for every periodic instance, not only the selected one">all instances</button></div>
+  <div class="group"><label for="sw-depth">SW depth</label><input type="range" id="sw-depth" min="1" max="6" step="1" value="3"><span id="sw-depth-v" class="info">3</span>
+    <label for="hw-depth">HW depth</label><input type="range" id="hw-depth" min="1" max="6" step="1" value="2"><span id="hw-depth-v" class="info">2</span></div>
+  <div class="group"><label for="tscale">Row scale</label><input type="range" id="tscale" min="-2" max="3" step="0.5" value="0" title="stretch / compress the rows"></div>
 </div>
 </details>
 
 <main>
   <section id="tab-timing">
-    <details class="panel" id="sw-panel" open>
-      <summary>SW structure <span class="hint">cores in parallel · modules · shared heap / global / static variables · IPC channels — click a module to expand, a function to focus</span></summary>
-      <div class="body" id="sw"></div>
-    </details>
-
     <div class="stack-wrap">
       <div class="stack">
+        <details class="panel" id="sw-panel" open>
+          <summary>SW structure <span class="hint">subsystems › modules › classes / structures / shared memory (sw_structure.yaml) — nested to the chosen depth · drag pans · wheel zooms · click a box to expand / collapse, a function to focus · a focused SW block lights up every box it executes in (■) / reads (r) / writes (w)</span>
+            <span class="pz"><button class="tog" data-pz="fit" data-host="sw">fit</button><button class="tog" data-pz="in" data-host="sw">＋</button><button class="tog" data-pz="out" data-host="sw">－</button></span></summary>
+          <div class="body diagram" id="sw"></div>
+        </details>
+
         <details class="panel" id="scene-panel" open>
-          <summary>Timing diagram <span class="hint">time → on the NW slot/symbol grid · top rows: SW structure touched (modules, shared variables, IPC, heap) · middle: cores → timing lanes with the call graph (rows = call depth) · bottom rows: HW blocks on their HW timing lines with deadlines · aligned view: drag pans, wheel zooms time, shift+wheel scrolls rows · 3D view: drag rotates</span></summary>
+          <summary>3D timing diagram <span class="hint">x = cores (diagonal) · y = time on the NW slot / symbol grid with the channel allocation · z = ISRs of a slot with their SW blocks (rows = call depth) · dashed verticals = reference lines (DL RTG, UL RTG, HW REF …) · ● on a box = register access · ◆ under a box = shared-memory / IPC / heap touch · drag pans, wheel zooms time, shift+wheel scrolls</span></summary>
           <div class="body scene-body">
             <div id="scene">
               <div class="axes"></div>
               <div id="ovw" class="ovw"></div>
               <div class="views">
-                <button class="tog" data-view="aligned" aria-pressed="true" title="orthographic front view: every row group shares one horizontal time axis">Aligned</button>
-                <button class="tog" data-view="tilt" title="orthographic view tilted around the time axis: call depth, SW rows (behind) and HW rows (in front) read as depth while time stays aligned">Tilt</button>
-                <button class="tog" data-view="iso" title="perspective view, free rotation (depth = call depth)">3D</button><button class="tog" data-view="front">Front</button>
+                <button class="tog" data-view="tilt" title="core planes stacked like cards (higher cores in front, overlap slider above), time pixel-aligned">Stacked</button>
+                <button class="tog" data-view="aligned" title="front view: every core shares one time axis">Aligned</button>
+                <button class="tog" data-view="iso" title="perspective view, free rotation (depth = cores)">3D</button><button class="tog" data-view="front">Front</button>
                 <button class="tog" data-view="side">Side</button><button class="tog" data-view="top">Top</button>
+                <button class="tog" data-view="pan" title="3D view: drag moves the view instead of rotating it (rotate with the right mouse button); arrow keys move too">✥ pan</button>
+                <button class="tog" data-view="left" title="move left (arrow key ←)">◀</button><button class="tog" data-view="right" title="move right (arrow key →)">▶</button><button class="tog" data-view="up" title="move up (arrow key ↑)">▲</button><button class="tog" data-view="down" title="move down (arrow key ↓)">▼</button>
                 <button class="tog" data-view="zin" title="zoom in (or mouse wheel)">＋</button><button class="tog" data-view="zout" title="zoom out (or mouse wheel)">－</button>
               </div>
               <div class="legend" id="legend"></div>
             </div>
           </div>
         </details>
+
+        <details class="panel" id="hw-panel" open>
+          <summary>HW structure <span class="hint">chains › blocks › registers (hw_structure.yaml) — arrows = data flow · a focused SW block lights up every block it reads (R) / writes (W) and marks deadline misses · click a block to highlight its accessors everywhere</span>
+            <span class="pz"><button class="tog" data-pz="fit" data-host="hw">fit</button><button class="tog" data-pz="in" data-host="hw">＋</button><button class="tog" data-pz="out" data-host="hw">－</button></span></summary>
+          <div class="body diagram" id="hw"></div>
+        </details>
       </div>
+      <div id="splitter" title="drag left / right to resize the side column · double-click resets"><i></i></div>
       <aside id="side">
         <details class="panel" id="tree-panel" open>
-          <summary>Call graph <span class="hint">▸ expands · name inspects · ◂ ▸ steps periodic instances</span></summary>
+          <summary>Call graph <span class="hint">of the selected SW block · ▸ expands · level control above · ◂ ▸ steps periodic instances</span></summary>
           <div class="body" id="tree"><div class="tree" id="tree-body"></div></div>
         </details>
+        <div id="hsplit" title="drag up / down to share the height between the call graph and the details · double-click resets"><i></i></div>
         <details class="panel" id="detail-panel" open>
-          <summary>Details <span class="hint">selected function / HW block and everything related to it</span></summary>
+          <summary>Details <span class="hint">function-level SW / HW relations of the selection</span></summary>
           <div class="body" id="detail"><div id="detail-body"></div></div>
         </details>
       </aside>
     </div>
-
-    <details class="panel" id="hw-panel" open>
-      <summary>HW blocks <span class="hint">block diagram with registers, per-destination deadlines and accessors — click a block to highlight its accessors everywhere</span></summary>
-      <div class="body" id="hw"></div>
-    </details>
   </section>
 
   <section id="tab-structure" hidden>
@@ -99,4 +119,5 @@
   </section>
 </main>
 <p class="foot" id="foot"></p>
+<pre id="selftest-out" hidden></pre>
 <div id="tip" role="tooltip"></div>

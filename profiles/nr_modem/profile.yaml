@@ -1,0 +1,66 @@
+# isrprof profile: 4-core NR L1 modem (mu = 1, 30 kHz SCS)
+#
+# A profile bundles the user inputs for one analysis target.  Every input lives in its own file so the
+# SW structure, the timing diagram and the HW structure can be edited (and versioned) independently:
+#
+#   build.yaml          where the sources are + how they are built (root, globs, cmake, compile_commands)
+#   sw_structure.yaml   SW structure diagram (top): subsystems / modules / classes / structures / shared
+#                       memory, their relations, the diagram depth, and the touch rules (which globals and
+#                       accessor macros count as a touch, heap / IPC primitives, architecture layers)
+#   timing.yaml         3D timing diagram (middle): numerology, cores (x), reference lines and channel
+#                       allocation on the NW time axis (y), ISRs / SW blocks per slot (z), cost model
+#   hw_structure.yaml   HW structure diagram (bottom): chains / groups / blocks / registers, links,
+#                       register-access macros, per-block deadlines
+#   annotations.yaml    free-text notes shown in tooltips / details
+#
+# Run:   python -m isrprof run nr_modem          ->  output/nr_modem/profile.html (+ .json + resolved inputs)
+#        python -m isrprof new my_modem --from nr_modem     (store a copy to adapt)
+name: nr_modem
+description: "4-core NR L1 (L1C / DL PHY / UL PHY / MEAS) built in the multi-core ISR style of real modem firmware"
+inputs:
+  build: build.yaml
+  sw_structure: sw_structure.yaml
+  timing: timing.yaml
+  hw_structure: hw_structure.yaml
+  annotations: annotations.yaml
+output:
+  dir: ../../output/nr_modem       # every artefact of this profile goes here (gitignored)
+  html: profile.html
+  json: profile.json
+
+# ---------------------------------------------------------------- viewer appearance (all optional)
+viewer:
+  default_view: tilt             # tilt (core planes stacked on the diagonal) | aligned (front) | 3d (perspective)
+  tilt_dx_px: 36                 # horizontal shift per core plane in the tilt view
+  theme: auto                    # auto | light | dark
+  unit: sym                      # sym | us
+  row_px: 12                     # pixel height of one call-depth row (scale 1)
+  label_margin_px: 200
+  expand_depth: 1                # call-tree levels open below the ISR entry at load (0 = entries only)
+  max_instances: 1500            # cap on periodic instances drawn per ISR
+  max_boxes: 40000               # LOD: above this many boxes only the shown instance keeps its subtree
+  max_labels: 700                # LOD: label sprites per build
+  legend: true
+  colors:
+    read: "#2a78d6"
+    write: "#eb6834"
+    miss: "#d03b3b"
+  channels: { show: true, row_px: 12 }
+  sw_structure: { depth: 3, columns: 4, open: [dl_pdsch] }   # depth shown at load (slider in the UI), nodes expanded
+  hw_structure: { depth: 2, columns: 4 }
+  dsm_max_functions: 400         # above this the DSM starts with every module collapsed (keeps the page fast)
+
+# ---------------------------------------------------------------- optional LLM assistance (disabled)
+llm:
+  enabled: false
+  provider: anthropic
+  model: claude-opus-5-5
+  effort: medium
+  api_key_env: ANTHROPIC_API_KEY
+  max_tokens: 4096
+  cache_file: .isrprof_llm_cache.json
+  tasks:
+    estimate_costs:   { enabled: true, reg_access_cycles: 40 }
+    classify_hw_macro: { enabled: true }
+    summarize:        { enabled: false }
+    suggest_layers:   { enabled: false }
