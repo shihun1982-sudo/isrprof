@@ -129,13 +129,13 @@ function relatedHtml() {
   if (r.vars.size) vars = `<table class="t"><tr><th>variable</th><th>kind</th><th>access</th><th>by</th></tr>` +
     [...r.vars.values()].map(({ v, rw, fids }) => {
       const fl = Object.entries(v.fields || {}).filter(([, fi]) => fi.fids.some(x => r.fids.has(x)));
-      return `<tr><td>${esc(v.name)}${v.registered ? ' <span class="b" title="registered in the config">®</span>' : ''}${v.shared_across_cores ? ' <span class="b x" title="touched from more than one core">cross-core</span>' : ''}${VNODE[v.key] ? ` <span class="muted">‹ ${esc(SWN[VNODE[v.key]] ? SWN[VNODE[v.key]].name : VNODE[v.key])}</span>` : ''}</td><td>${v.kind}</td><td>${rw.join('/')}</td><td>${fids.map(short).join(', ')}</td></tr>` +
+      return `<tr><td><span class="varl" data-var="${esc(v.key)}" style="cursor:pointer">${esc(v.name)}</span>${v.registered ? ' <span class="b" title="registered in the config">®</span>' : ''}${v.shared_across_cores ? ' <span class="b x" title="touched from more than one core">cross-core</span>' : ''}${VNODE[v.key] ? ` <span class="muted">‹ ${esc(SWN[VNODE[v.key]] ? SWN[VNODE[v.key]].name : VNODE[v.key])}</span>` : ''}</td><td>${v.kind}</td><td>${rw.join('/')}</td><td>${fids.map(short).join(', ')}</td></tr>` +
         fl.map(([name, fi]) => `<tr><td style="padding-left:14px;color:var(--muted)">.${esc(name)}</td><td></td><td>${fi.r ? 'r' : ''}${fi.r && fi.w ? '/' : ''}${fi.w ? 'w' : ''}</td><td style="color:var(--muted)">${fi.fids.filter(x => r.fids.has(x)).map(short).join(', ')}</td></tr>`).join('');
     }).join('') + '</table>';
   else vars = '<div class="muted">no shared variable touched</div>';
   h += section('sec-vars', 'Shared memory / variables', `${r.vars.size}`, vars, r.vars.size > 0);
   let io = '';
-  if (r.ipc.size) io += `<div><b>IPC</b> ${[...r.ipc].map(([ch, ops]) => `<code>${esc(ch)}</code> (${ops.map(o => o.macro.replace('IPC_', '').toLowerCase() + ' in ' + short(o.fid)).join(', ')})`).join(' · ')}</div>`;
+  if (r.ipc.size) io += `<div><b>IPC</b> ${[...r.ipc].map(([ch, ops]) => `<code class="ipcl" data-ipc="${esc(ch)}" style="cursor:pointer">${esc(ch)}</code> (${ops.map(o => o.macro.replace('IPC_', '').toLowerCase() + ' in ' + short(o.fid)).join(', ')})`).join(' · ')}</div>`;
   if (r.heap.length) io += `<div><b>Heap</b> ${r.heap.map(u => `<code>${esc(short(u.fid))}</code> → ${u.calls.map(c => esc(c.fn)).join(', ')}`).join(' · ')}</div>`;
   if (io) h += section('sec-io', 'IPC / heap', `${r.ipc.size + r.heap.length}`, io, true);
   h += section('sec-fns', 'Functions', `${r.fids.size}`, `<div class="fnlist">${[...r.fids].map(f => `<span class="b ${f === S.selFid ? '' : 'ext'} fnb" data-fid="${esc(f)}">${esc(short(f))}</span>`).join(' ')}</div>` +
@@ -159,7 +159,7 @@ function varDetail(key) {
   users.forEach(u => { const c = u.core == null ? '?' : u.core; if (!byCore.has(c)) byCore.set(c, []); byCore.get(c).push(u); });
   let h = `<div class="mono" style="font-weight:600;font-size:13px">${esc(v.name)} <span class="b">${v.kind}</span>${v.registered ? ' <span class="b" title="registered in the config">registered</span>' : ''}${v.shared_across_cores ? ' <span class="b x">cross-core</span>' : ''}</div><dl class="kv">`;
   h += `<dt>where</dt><dd>${esc(v.file)}${v.line ? ':' + v.line : ''}</dd><dt>decl</dt><dd>${esc(v.decl)}</dd>`;
-  if (VNODE[key]) h += `<dt>SW node</dt><dd>${esc(SWN[VNODE[key]] ? SWN[VNODE[key]].name : VNODE[key])}</dd>`;
+  if (VNODE[key]) h += `<dt>SW node</dt><dd><span class="ndl" data-node="${esc(VNODE[key])}" style="cursor:pointer">${esc(SWN[VNODE[key]] ? SWN[VNODE[key]].name : VNODE[key])}</span></dd>`;
   if (v.note) h += `<dt>note</dt><dd>${esc(v.note)}</dd>`;
   h += `<dt>cores</dt><dd>${v.cores.join(', ') || '—'} · ${users.length} function${users.length === 1 ? '' : 's'}</dd></dl>`;
   h += `<table class="t"><tr><th>core</th><th>function</th><th>access</th><th>fields / via</th></tr>` +
@@ -185,12 +185,21 @@ function swNodeDetail(id) {
   if (rels.length) h += `<div style="font-size:11.5px;margin-top:6px"><b>Relations</b> ${rels.map(r => `${esc(SWN[r.from] ? SWN[r.from].name : r.from)} →<i>${esc(r.kind)}</i>→ ${esc(SWN[r.to] ? SWN[r.to].name : r.to)}${r.label ? ' (' + esc(r.label) + ')' : ''}`).join(' · ')}</div>`;
   return h;
 }
+function ipcDetail(ch) {
+  const c = P.memory.ipc_channels.find(x => x.id === ch), ops = P.memory.ipc_ops.filter(o => o.channel === ch);
+  let h = `<div class="mono" style="font-weight:600;font-size:13px">${esc(ch)} <span class="b">ipc channel</span></div><dl class="kv">`;
+  if (c) h += `<dt>direction</dt><dd>core ${c.from} → core ${c.to}</dd>`;
+  h += `<dt>used by</dt><dd>${ops.length} call${ops.length === 1 ? '' : 's'}</dd></dl>`;
+  h += `<table class="t"><tr><th>function</th><th>core</th><th>op</th><th>line</th></tr>${ops.map(o => `<tr><td><span class="fnb" data-fid="${esc(o.fid)}" style="cursor:pointer">${esc(short(o.fid))}</span></td><td>${o.core == null ? '?' : o.core}</td><td>${esc(o.macro)}</td><td>${o.line}</td></tr>`).join('')}</table>`;
+  return h;
+}
 function renderDetail() {
   const el = document.getElementById('detail-body');
   let h = '';
   if (S.block) h = blockDetail(BX[S.block]);
   else if (S.swNode) h = swNodeDetail(S.swNode);
-  else if (S.selVar && !S.selFid) h = varDetail(S.selVar);
+  else if (S.selVar) h = varDetail(S.selVar) + (REL ? relatedHtml() : '');
+  else if (S.selIpc) h = ipcDetail(S.selIpc) + (REL ? relatedHtml() : '');
   else if (!S.selFid) h = '<span style="color:var(--muted)">Click a box in the timing diagram, a row in the call graph, a function in the SW structure or a HW block. The Focus toggle decides whether the selection relates only that function or its whole call subtree; the level control sets how deep the call graph unfolds; ◂ ▸ steps through periodic instances.</span>';
   else {
     const shownPath = S.selPath || findPath(S.selFid);
@@ -220,6 +229,9 @@ function renderDetail() {
   el.querySelectorAll('.blkl').forEach(b => b.addEventListener('click', () => selectBlock(b.dataset.block)));
   el.querySelectorAll('.ndl').forEach(b => b.addEventListener('click', () => selectSwNode(b.dataset.node)));
   el.querySelectorAll('.rel-row[data-node]').forEach(b => b.addEventListener('click', () => selectSwNode(b.dataset.node)));
+  el.querySelectorAll('.varl').forEach(b => b.addEventListener('click', () => selectVariable(b.dataset.var)));
+  el.querySelectorAll('.ipcl').forEach(b => b.addEventListener('click', () => selectIpc(b.dataset.ipc)));
+  const hb = document.getElementById('hist-back'), hf = document.getElementById('hist-fwd'); if (hb) { hb.disabled = !canBack(); hf.disabled = !canForward(); }
   el.querySelectorAll('.rel-row[data-block]').forEach(b => { if (b.dataset.block) b.addEventListener('click', () => selectBlock(b.dataset.block)); });
   // remember which sections are open
   el.querySelectorAll('details.sub').forEach(d => { if (S.secOpen && d.id in S.secOpen) d.open = S.secOpen[d.id]; d.addEventListener('toggle', () => { S.secOpen = S.secOpen || {}; S.secOpen[d.id] = d.open; }); });

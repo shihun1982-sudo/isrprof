@@ -164,14 +164,14 @@ function renderSW() {
   });
   applySWHighlight();
 }
-function selectVar(key) { S.selVar = S.selVar === key ? null : key; renderDetail(); applySWHighlight(); }
+const selectVar = selectVariable;
 function applySWHighlight() {
   const rel = REL, sel = S.selFid, blk = S.block ? BX[S.block] : null;
   const rwCls = rw => rw === 'x' ? 'rel-x' : rw === 'c' ? 'rel-c' : rw === 'rw' ? 'rel-rw' : rw === 'w' ? 'rel-w' : 'rel-r';
   highlightNested('sw',
     id => {
       const cls = [];
-      if (S.swNode === id) cls.push('sel');
+      if (S.swNode === id || (S.selVar && VNODE[S.selVar] === id)) cls.push('sel');
       if (rel) { const t = rel.sw.get(id); if (t) { cls.push(rwCls(t.rw)); return { cls, badge: t.rw === 'x' ? '■ ' + t.fids.size : (t.rw === 'c' ? '' : t.rw + ' ' + t.fids.size), badgeColor: t.rw === 'w' || t.rw === 'rw' ? 'var(--write)' : t.rw === 'r' ? 'var(--read)' : 'var(--accent)' }; } cls.push('dim'); return { cls }; }
       if (blk) { const hit = [...NODE_FIDS[id]].some(f => blk.accessors.includes(f)); cls.push(hit ? 'rel-c' : 'dim'); return { cls }; }
       if (S.selVar) { const v = VARX[S.selVar], vn = VNODE[S.selVar]; const hit = vn === id || (SWL.anc[vn] || []).includes(id) || (v && [...NODE_FIDS[id]].some(f => v.accessors.some(a => a.fid === f))); cls.push(hit ? 'rel-c' : 'dim'); return { cls }; }

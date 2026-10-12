@@ -5,7 +5,7 @@ function renderAll(opts) {
   opts = opts || {};
   REL = computeRel();
   document.getElementById('focus-info').textContent = REL
-    ? `${S.selFid ? short(S.selFid) : (SWN[S.swNode] ? SWN[S.swNode].name : S.swNode)} → ${REL.fids.size} fn · ${REL.blocks.size} HW block${REL.blocks.size === 1 ? '' : 's'} · ${[...REL.sw.values()].filter(t => t.rw !== 'c').length} SW node${REL.sw.size === 1 ? '' : 's'} · ${REL.vars.size} var${REL.vars.size === 1 ? '' : 's'} · ${REL.ipc.size} ipc`
+    ? `${S.selFid ? short(S.selFid) : S.swNode ? (SWN[S.swNode] ? SWN[S.swNode].name : S.swNode) : S.selVar ? (VARX[S.selVar] ? VARX[S.selVar].name : S.selVar) + ' (users)' : S.selIpc ? S.selIpc + ' (users)' : ''} → ${REL.fids.size} fn · ${REL.blocks.size} HW block${REL.blocks.size === 1 ? '' : 's'} · ${[...REL.sw.values()].filter(t => t.rw !== 'c').length} SW node${REL.sw.size === 1 ? '' : 's'} · ${REL.vars.size} var${REL.vars.size === 1 ? '' : 's'} · ${REL.ipc.size} ipc`
     : (S.block ? `HW ${S.block} ← ${BX[S.block].accessors.length} functions` : 'nothing selected');
   document.getElementById('range-info').textContent = `${fmtAbs(R0())} → ${fmtAbs(R1())} · ${((R1() - R0()) / SLOT).toFixed(2)} slot${S.range ? '' : ' (full window)'}`;
   if (typeof syncSlotInputs === 'function') syncSlotInputs();
@@ -104,7 +104,9 @@ document.getElementById('hw-depth').value = S.hwDepth; document.getElementById('
 document.getElementById('sw-depth').addEventListener('input', e => setSwDepth(+e.target.value));
 document.getElementById('hw-depth').addEventListener('input', e => setHwDepth(+e.target.value));
 document.querySelectorAll('.pz .tog').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const d = DG[b.dataset.host]; if (!d) return; const host = document.getElementById(b.dataset.host); if (b.dataset.pz === 'fit') d.pz.fit(); else d.pz.zoom(b.dataset.pz === 'in' ? 1.3 : 1 / 1.3, host.clientWidth / 2, host.clientHeight / 2); }));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') clearFocus(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') clearFocus(); if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); histBack(); } if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); histForward(); } });
+document.getElementById('hist-back').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); histBack(); });
+document.getElementById('hist-fwd').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); histForward(); });
 document.querySelectorAll('.tabs button[role="tab"]').forEach(b => b.addEventListener('click', () => {
   S.tab = b.dataset.tab;
   document.querySelectorAll('.tabs button[role="tab"]').forEach(x => x.setAttribute('aria-selected', x === b));
@@ -248,6 +250,15 @@ function selfTest() {
   const isr = P.isrs.find(i => i.hw_events.length) || P.isrs[0];
   step('select ISR root ' + isr.name, () => { selectNode(isr.name + '#' + shownInst(isr).k, isr.tree.fid); return { fids: REL.fids.size, blocks: REL.blocks.size, swNodes: [...REL.sw.values()].filter(t => t.rw !== 'c').length, vars: REL.vars.size, swRelX: swCount('rel-x'), swRelRW: swCount('rel-r') + swCount('rel-w') + swCount('rel-rw'), swDim: swCount('dim'), hwRel: hwCount('rel-r') + hwCount('rel-w') + hwCount('rel-rw') + hwCount('rel-miss'), hwDim: hwCount('dim'), treeRows: document.querySelectorAll('#tree-body .row').length, detailTables: document.querySelectorAll('#detail-body table').length, outline: G.selOutline ? G.selOutline.visible : null, focusInfo: document.getElementById('focus-info').textContent }; });
   step('side column clipping', () => { setLevel(30); const tp = document.getElementById('tree-panel').getBoundingClientRect(), dp = document.getElementById('detail-panel').getBoundingClientRect(), tb = document.getElementById('tree'), last = [...document.querySelectorAll('#tree-body .row')].pop().getBoundingClientRect(); setLevel(2); return { treeBottom: Math.round(tp.bottom), detailTop: Math.round(dp.top), overlap: Math.round(tp.bottom - dp.top), lastRowBottom: Math.round(last.bottom), treeScrolls: tb.scrollHeight > tb.clientHeight, treeClientH: tb.clientHeight }; });
+  step('history back / forward + variable / ipc links', () => {
+    clearFocus(); const root = isr.name + '#' + shownInst(isr).k; selectNode(root, isr.tree.fid);
+    const blk = BLOCKS.find(b => b.accessors.length); selectBlock(blk.id); const atBlock = S.block;
+    histBack(); const back1 = { sel: S.selFid, block: S.block }; histBack(); const back2 = { sel: S.selFid, block: S.block }; histForward(); const fwd = { sel: S.selFid }; histForward(); const fwd2 = { block: S.block };
+    const v = P.memory.variables.find(x => x.accessors.length > 1); selectVariable(v.key);
+    const vr = { selVar: S.selVar, fids: REL ? REL.fids.size : 0, detailHasUsers: document.querySelectorAll('#detail-body table tr').length > 1, swSel: document.querySelectorAll('#sw .nd.sel').length };
+    const ch = P.memory.ipc_ops[0].channel; selectIpc(ch); const ir = { selIpc: S.selIpc, fids: REL ? REL.fids.size : 0 };
+    histBack(); const backVar = S.selVar; selectNode(root, isr.tree.fid);          // leave the ISR root selected for the following steps
+    return { atBlock, back1, back2, fwd, fwd2, vr, ir, backVar, buttons: !!document.getElementById('hist-back') }; });
   step('details sections', () => { const secs = [...document.querySelectorAll('#detail-body details.sub')].map(d => d.id); const swRows = [...document.querySelectorAll('#sec-sw .rel-row')], anc = swRows.filter(r => r.classList.contains('anc')).length; const hwRows = document.querySelectorAll('#sec-hw .rel-row').length, regs = document.querySelectorAll('#sec-hw .rel-regs .reg').length; const d = document.getElementById('sec-sw'); d.open = false; const closed = !d.open; d.open = true; return { sections: secs, swFirst: secs[0] === 'sec-sw' && secs[1] === 'sec-hw', swRows: swRows.length, swAncestors: anc, hwRows, regs, collapsible: closed }; });
   step('focus: this function only', () => { setDeep(false); return { fids: REL.fids.size, blocks: REL.blocks.size }; });
   step('focus: include callees', () => { setDeep(true); return { fids: REL.fids.size, blocks: REL.blocks.size }; });
@@ -323,5 +334,5 @@ function selfTest() {
   console.log('SELFTEST ' + JSON.stringify(out));
   return out;
 }
-window.isrprof = { S, P, REL: () => REL, setRefs, selectNode, selectBlock, selectSwNode, clearFocus, setLevel, setDeep, setView, applyRange, setSlots, setIsrs, setCores, setSwDepth, setHwDepth, build3D, renderAll, selfTest, stats: () => build3D.stats };
+window.isrprof = { S, P, REL: () => REL, setRefs, selectVariable, selectIpc, histBack, histForward, selectNode, selectBlock, selectSwNode, clearFocus, setLevel, setDeep, setView, applyRange, setSlots, setIsrs, setCores, setSwDepth, setHwDepth, build3D, renderAll, selfTest, stats: () => build3D.stats };
 if (SELFTEST) setTimeout(selfTest, 0);

@@ -29,7 +29,11 @@ in the timing diagram (a function box or an ISR row) focuses it: the SW structur
 executes in (■) / reads (r) / writes (w), the HW structure every block it touches (R / W, ✗ for deadline
 misses), the call graph on the right shows the ISR's tree with the function selected (selecting never re-roots the tree;
 *pin … as root* keeps a function at the top while you walk its callees, ▲ caller / ▼ callee / ◁ ▷ move the
-selection one call at a time), and Details lists the function-level relations.
+selection one call at a time), and Details lists the function-level relations. Everything in Details is a link:
+a SW node shows what it contains and which HW blocks its functions touch, a HW block lists every access to it
+(time, register, function, ISR, deadline), a shared variable lists every function that reads / writes it per
+core and field, an IPC channel every sender / receiver; each of these also focuses those functions in the
+diagrams. *◀ back* / *▶* (Alt+← / Alt+→) walk the selection history.
 *this function only* vs *include callees to leaves* decides whether the focus is the function or its whole
 call closure; *call graph level* sets how many levels unfold (every node can still be expanded / collapsed
 individually); *SW depth* / *HW depth* set how deep the structure diagrams nest.

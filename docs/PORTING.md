@@ -258,6 +258,7 @@ output/<name>/
 - 점선: 색 점선은 `timing.yaml`의 `references`(NW ± offset 기준선, 색은 선마다 고정, 범례와 컨트롤의 체크박스에 이름·offset 표시), 빨간 점선은 `hw_structure.yaml` 블록의 데드라인(ISR 인스턴스마다 표시). 컨트롤에서 선별로 끄고 켤 수 있습니다.
 - 3D 뷰 이동: 마우스 오른쪽 버튼 드래그 또는 `✥ pan` 버튼을 켠 뒤 왼쪽 드래그, 화살표 버튼 ◀ ▶ ▲ ▼, 키보드 화살표(다이어그램 위에 마우스를 둔 상태). 2D 뷰에서는 같은 조작이 시간 범위 이동 / 행 스크롤입니다.
 - 컨트롤: 코어 체크박스, ISR 체크박스 목록(필터, all/none, 코어별 only), Slots(from/count, ◂ ▸, all), Core overlap, 단위, Focus(이 함수만 / leaf까지), 콜그래프 레벨(±, all, entries only, all instances), SW/HW depth, Row scale.
+- Details의 항목은 모두 링크입니다. SW 노드 → 포함 내용과 그 함수들이 건드리는 HW 블록, HW 블록 → 그 블록에 대한 모든 접근(시각·레지스터·함수·ISR·데드라인), 공유 변수 → 코어·필드별로 읽고 쓰는 모든 함수, IPC 채널 → 송·수신 함수. 선택할 때마다 다이어그램도 그 함수들로 포커스되며, `◀ back` / `▶`(Alt+← / Alt+→)로 이전 선택으로 돌아갑니다.
 - 콜그래프: 선택해도 트리의 최상위는 ISR 진입점으로 유지됩니다(선택 행만 강조·자동 펼침). `pin … as root` 체크박스로 선택 함수를 최상위에 고정한 채 하위를 펼칠 수 있고, ▲ caller / ▼ callee / ◁ ▷ 버튼으로 한 호출씩 이동합니다.
 - 모든 창은 아래 모서리를 드래그해 높이를 바꿀 수 있고, 오른쪽 열은 가운데 분할선을 드래그해 너비를 바꿉니다(더블클릭으로 초기화, 브라우저에 기억됨). 세 오버레이는 기본적으로 한 화면(SW 22% / Timing 46% / HW 22%)에 들어오도록 크기가 잡힙니다.
 - 딥링크: `#sel-<ISR 또는 함수>`, `#selonly-<함수>`, `#range-0.9~1.3`, `#slots-2~3`, `#isr-A,B`, `#overlap-70`, `#view-3d|tilt|aligned`, `#level-4`, `#swdepth-2`, `#hwdepth-1`, `#structure`, `#selftest`.

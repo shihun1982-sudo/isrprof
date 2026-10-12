@@ -105,6 +105,12 @@ def check(report: dict) -> list[str]:
     sc = st.get("side column clipping", {})
     if sc and not (sc.get("overlap", 1) <= 0 and (sc.get("treeScrolls") or sc.get("lastRowBottom", 0) <= sc.get("treeBottom", 0))):
         bad.append(f"call graph overflows into the details panel instead of scrolling: {sc}")
+    hb = st.get("history back / forward + variable / ipc links", {})
+    if hb and not (hb.get("back1", {}).get("sel") and not hb.get("back1", {}).get("block") and hb.get("back2", {}).get("sel") is None
+                   and hb.get("fwd", {}).get("sel") and hb.get("fwd2", {}).get("block") == hb.get("atBlock")):
+        bad.append(f"selection history back / forward did not restore the selections: {hb}")
+    if hb and not (hb.get("vr", {}).get("fids", 0) > 1 and hb.get("vr", {}).get("detailHasUsers") and hb.get("ir", {}).get("fids", 0) > 0 and hb.get("backVar") == hb.get("vr", {}).get("selVar")):
+        bad.append(f"variable / IPC selection did not focus their users: {hb}")
     ds = st.get("details sections", {})
     if ds and not (ds.get("swFirst") and ds.get("swRows", 0) > 0 and ds.get("swAncestors", 0) > 0 and ds.get("hwRows", 0) > 0 and ds.get("regs", 0) > 0 and ds.get("collapsible")):
         bad.append(f"details sections (SW hierarchy first, HW second, collapsible) not as expected: {ds}")

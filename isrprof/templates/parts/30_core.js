@@ -202,8 +202,30 @@ function closure(fid) {
 function focusFids() {
   if (S.selFid) return S.deep ? closure(S.selFid) : new Set([S.selFid]);
   if (S.swNode) return NODE_FIDS[S.swNode] || new Set();
+  if (S.selVar) { const v = VARX[S.selVar]; return new Set(v ? v.accessors.map(a => a.fid) : []); }     // every function touching the variable
+  if (S.selIpc) return new Set(P.memory.ipc_ops.filter(o => o.channel === S.selIpc).map(o => o.fid));   // every function using the channel
   return null;
 }
+// ---- selection history: every selection is a step; back / forward restore it (Details ◀ ▶, Alt+← / Alt+→)
+const HIST = { list: [], pos: -1, muted: false };
+const snapshot = () => ({ selPath: S.selPath, selFid: S.selFid, block: S.block, swNode: S.swNode, selVar: S.selVar || null, selIpc: S.selIpc || null, pinPath: S.pinPath || null });
+const sameSnap = (a, b) => a && b && ['selPath', 'selFid', 'block', 'swNode', 'selVar', 'selIpc'].every(k => a[k] === b[k]);
+function pushHist() {
+  if (HIST.muted) return;
+  const snap = snapshot();
+  if (sameSnap(HIST.list[HIST.pos], snap)) return;
+  HIST.list.length = HIST.pos + 1; HIST.list.push(snap); if (HIST.list.length > 200) HIST.list.shift(); HIST.pos = HIST.list.length - 1;
+}
+function restoreSnap(snap) {
+  HIST.muted = true;
+  S.selPath = snap.selPath; S.selFid = snap.selFid; S.block = snap.block; S.swNode = snap.swNode; S.selVar = snap.selVar; S.selIpc = snap.selIpc; S.pinPath = snap.pinPath;
+  if (S.selPath && isrOfPath(S.selPath)) S.inst[isrOfPath(S.selPath).name] = instOfPath(S.selPath);
+  renderAll({ light: true }); HIST.muted = false;
+}
+function histBack() { if (HIST.pos > 0) { HIST.pos--; restoreSnap(HIST.list[HIST.pos]); } }
+function histForward() { if (HIST.pos < HIST.list.length - 1) { HIST.pos++; restoreSnap(HIST.list[HIST.pos]); } }
+const canBack = () => HIST.pos > 0, canForward = () => HIST.pos < HIST.list.length - 1;
+function resetSel() { S.selFid = null; S.selPath = null; S.block = null; S.swNode = null; S.selVar = null; S.selIpc = null; }
 function inFocus(path, fid) {            // instance-agnostic: the same subtree in every periodic instance
   if (!S.selFid && !S.swNode) return true;
   if (S.selPath && path) { const a = expKey(path), b = expKey(S.selPath); return S.deep ? (a === b || a.startsWith(b + '/')) : a === b; }
@@ -240,10 +262,12 @@ function computeRel() {
 }
 // "is this function related to the current selection" (focus set, or the selected HW block's accessors)
 const hl = fid => (!REL || REL.fids.has(fid)) && (!S.block || (BX[S.block] && BX[S.block].accessors.includes(fid)));
-function clearFocus() { S.selFid = null; S.selPath = null; S.block = null; S.swNode = null; renderAll({ light: true }); }
-function selectNode(path, fid) { S.selPath = path; S.selFid = fid; S.block = null; S.swNode = null; if (path) S.inst[isrOfPath(path).name] = instOfPath(path); renderAll({ light: true }); }
-function selectBlock(id) { S.block = S.block === id ? null : id; S.selFid = null; S.selPath = null; S.swNode = null; renderAll({ light: true }); }
-function selectSwNode(id) { S.swNode = S.swNode === id ? null : id; S.selFid = null; S.selPath = null; S.block = null; renderAll({ light: true }); }
+function clearFocus() { resetSel(); pushHist(); renderAll({ light: true }); }
+function selectNode(path, fid) { resetSel(); S.selPath = path; S.selFid = fid; if (path) S.inst[isrOfPath(path).name] = instOfPath(path); pushHist(); renderAll({ light: true }); }
+function selectBlock(id) { const off = S.block === id; resetSel(); S.block = off ? null : id; pushHist(); renderAll({ light: true }); }
+function selectSwNode(id) { const off = S.swNode === id; resetSel(); S.swNode = off ? null : id; pushHist(); renderAll({ light: true }); }
+function selectVariable(key) { const off = S.selVar === key; resetSel(); S.selVar = off ? null : key; pushHist(); renderAll({ light: true }); }
+function selectIpc(ch) { const off = S.selIpc === ch; resetSel(); S.selIpc = off ? null : ch; pushHist(); renderAll({ light: true }); }
 function setDeep(d) { S.deep = d; document.getElementById('focus-self').setAttribute('aria-pressed', !d); document.getElementById('focus-deep').setAttribute('aria-pressed', d); renderAll({ light: true }); }
 function setLevel(l) { S.level = Math.max(0, Math.min(30, l | 0)); S.expanded.clear(); S.collapsed.clear(); bumpExp(); document.getElementById('level').value = S.level; renderAll(); }
 function applyRange(r) { S.range = r; build3D.fitted = false; renderAll(); }
