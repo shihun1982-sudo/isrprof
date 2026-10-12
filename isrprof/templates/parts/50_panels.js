@@ -89,25 +89,57 @@ function staticItem(fid, path, depth, seen) {     // call tree from the static c
 }
 
 // ------------------------------------------------------------------ details
+// Details: the relations of the focus set as collapsible sections, SW structure first (as a hierarchy), then HW
+// structure (chains › blocks › registers), then shared memory, IPC / heap and the related functions
+const rwWord = rw => rw === 'x' ? 'executes' : rw === 'c' ? '' : rw === 'rw' ? 'read / write' : rw === 'w' ? 'write' : 'read';
+const rwCls = rw => rw === 'x' ? 'x' : rw === 'rw' || rw === 'w' ? 'w' : rw === 'r' ? 'r' : '';
+function section(id, title, count, body, open) {
+  return `<details class="sub" id="${id}" ${open ? 'open' : ''}><summary>${title}<span class="cnt">${count}</span></summary><div class="sub-body">${body}</div></details>`;
+}
+function swTreeHtml(r) {
+  // every touched node plus its ancestors, in the hierarchy's depth-first order (SWS.nodes is already that order)
+  const rows = SWS.nodes.filter(n => r.sw.has(n.id));
+  if (!rows.length) return '<div class="muted">no SW structure node touched</div>';
+  return rows.map(n => {
+    const t = r.sw.get(n.id), kind = t.rw, fns = [...t.fids].map(short);
+    return `<div class="rel-row ${rwCls(kind)} ${kind === 'c' ? 'anc' : ''}" style="padding-left:${6 + n.depth * 14}px" data-node="${esc(n.id)}" title="${esc(n.kind)}${n.note ? ' · ' + esc(n.note) : ''}">` +
+      `<span class="tw">${n.children.length ? '▾' : '·'}</span><span class="nm">${esc(n.name)}</span><span class="kd">${esc(n.kind)}</span>` +
+      (kind !== 'c' ? `<span class="b ${rwCls(kind)}">${rwWord(kind)}</span><span class="by">${fns.join(', ')}</span>` : '') + '</div>';
+  }).join('');
+}
+function hwTreeHtml(r) {
+  const rows = HWS.nodes.filter(n => r.hw.has(n.id));
+  if (!rows.length) return '<div class="muted">no HW register access in this set</div>';
+  return rows.map(n => {
+    const t = r.hw.get(n.id), isBlock = !!BX[n.id];
+    let h = `<div class="rel-row ${t.c ? 'anc' : (t.miss ? 'miss' : (t.w ? 'w' : 'r'))}" style="padding-left:${6 + n.depth * 14}px" data-block="${isBlock ? esc(n.id) : ''}" data-hwnode="${esc(n.id)}" title="${esc(n.kind)}${n.note ? ' · ' + esc(n.note) : ''}">` +
+      `<span class="tw">${n.children.length ? '▾' : '·'}</span><span class="nm">${esc(n.name)}</span><span class="kd">${isBlock ? esc(n.id) : esc(n.kind)}</span>` +
+      (t.c ? '' : `${t.r ? `<span class="b r">R ${t.r}</span>` : ''}${t.w ? `<span class="b w">W ${t.w}</span>` : ''}${t.miss ? `<span class="b x">miss ${t.miss}</span>` : ''}`) + '</div>';
+    if (!t.c && t.regs && t.regs.size) h += `<div class="rel-regs" style="padding-left:${26 + n.depth * 14}px">${[...t.regs].map(([rg, c]) => `<span class="reg ${c.miss ? 'miss' : ''}">${esc(rg)}<i>${c.r ? 'R' + c.r : ''}${c.w ? 'W' + c.w : ''}</i></span>`).join('')}</div>`;
+    return h;
+  }).join('');
+}
 function relatedHtml() {
   const r = REL, mode = S.deep ? 'incl. callees down to the leaves' : 'this function only';
-  let h = `<h3 style="margin-top:10px">Related · ${r.fids.size} function${r.fids.size > 1 ? 's' : ''} (${mode})</h3>`;
-  h += `<div style="font-size:11.5px;line-height:1.9">${[...r.fids].map(f => `<span class="b ${f === S.selFid ? '' : 'ext'} fnb" data-fid="${esc(f)}" style="cursor:pointer">${esc(short(f))}</span>`).join(' ')}</div>`;
-  const swRows = [...r.sw].filter(([id, t]) => t.rw !== 'c').sort((a, b) => (a[1].rw === 'x' ? 0 : 1) - (b[1].rw === 'x' ? 0 : 1) || a[0].localeCompare(b[0]));
-  if (swRows.length) h += `<h3 style="margin-top:8px">SW structure</h3><table class="t"><tr><th>node</th><th>kind</th><th>touch</th><th>by</th></tr>` +
-    swRows.map(([id, t]) => { const n = SWN[id]; return `<tr><td><span class="ndl" data-node="${esc(id)}" style="cursor:pointer">${esc(n ? n.name : id)}</span>${n && n.parent ? ` <span style="color:var(--muted)">‹ ${esc(SWN[n.parent] ? SWN[n.parent].name : n.parent)}</span>` : ''}</td><td>${esc(n ? n.kind : '')}</td><td>${t.rw === 'x' ? 'executes' : t.rw}</td><td>${[...t.fids].map(short).join(', ')}</td></tr>`; }).join('') + '</table>';
-  if (r.blocks.size) h += `<h3 style="margin-top:8px">HW structure</h3><table class="t"><tr><th>HW block</th><th>registers</th><th>R</th><th>W</th><th>miss</th></tr>` +
-    [...r.blocks].map(([b, x]) => `<tr class="${x.miss ? 'viol' : ''}"><td><span class="blkl" data-block="${esc(b)}" style="cursor:pointer">${esc(BX[b] ? BX[b].name : b)}</span> <span style="color:var(--muted)">${esc(b)}</span></td><td>${[...x.regs].map(([rg, n]) => rg + (n.n > 1 ? '×' + n.n : '')).join(' ')}</td><td>${x.r}</td><td>${x.w}</td><td>${x.miss || ''}</td></tr>`).join('') + '</table>';
-  else h += '<div style="color:var(--muted);font-size:11.5px;margin-top:4px">no HW register access in this set</div>';
-  if (r.vars.size) h += `<h3 style="margin-top:8px">Shared memory / variables</h3><table class="t"><tr><th>variable</th><th>kind</th><th>access</th><th>by</th></tr>` +
+  const swN = [...r.sw.values()].filter(t => t.rw !== 'c').length, hwN = r.blocks.size;
+  let h = `<div class="rel-head">Related · ${r.fids.size} function${r.fids.size > 1 ? 's' : ''} <span class="muted">(${mode})</span></div>`;
+  h += section('sec-sw', 'SW structure', `${swN} node${swN === 1 ? '' : 's'}`, swTreeHtml(r), true);
+  h += section('sec-hw', 'HW structure', `${hwN} block${hwN === 1 ? '' : 's'}`, hwTreeHtml(r), true);
+  let vars = '';
+  if (r.vars.size) vars = `<table class="t"><tr><th>variable</th><th>kind</th><th>access</th><th>by</th></tr>` +
     [...r.vars.values()].map(({ v, rw, fids }) => {
       const fl = Object.entries(v.fields || {}).filter(([, fi]) => fi.fids.some(x => r.fids.has(x)));
-      return `<tr><td>${esc(v.name)}${v.registered ? ' <span class="b" title="registered in the config">®</span>' : ''}${v.shared_across_cores ? ' <span class="b x" title="touched from more than one core">cross-core</span>' : ''}</td><td>${v.kind}</td><td>${rw.join('/')}</td><td>${fids.map(short).join(', ')}</td></tr>` +
+      return `<tr><td>${esc(v.name)}${v.registered ? ' <span class="b" title="registered in the config">®</span>' : ''}${v.shared_across_cores ? ' <span class="b x" title="touched from more than one core">cross-core</span>' : ''}${VNODE[v.key] ? ` <span class="muted">‹ ${esc(SWN[VNODE[v.key]] ? SWN[VNODE[v.key]].name : VNODE[v.key])}</span>` : ''}</td><td>${v.kind}</td><td>${rw.join('/')}</td><td>${fids.map(short).join(', ')}</td></tr>` +
         fl.map(([name, fi]) => `<tr><td style="padding-left:14px;color:var(--muted)">.${esc(name)}</td><td></td><td>${fi.r ? 'r' : ''}${fi.r && fi.w ? '/' : ''}${fi.w ? 'w' : ''}</td><td style="color:var(--muted)">${fi.fids.filter(x => r.fids.has(x)).map(short).join(', ')}</td></tr>`).join('');
     }).join('') + '</table>';
-  if (r.ipc.size) h += `<div style="font-size:11.5px;margin-top:6px"><b>IPC</b> ${[...r.ipc].map(([ch, ops]) => `<code>${esc(ch)}</code> (${ops.map(o => o.macro.replace('IPC_', '').toLowerCase() + ' in ' + short(o.fid)).join(', ')})`).join(' · ')}</div>`;
-  if (r.heap.length) h += `<div style="font-size:11.5px;margin-top:4px"><b>Heap</b> ${r.heap.map(u => `<code>${esc(short(u.fid))}</code> → ${u.calls.map(c => esc(c.fn)).join(', ')}`).join(' · ')}</div>`;
-  h += `<div style="font-size:11.5px;margin-top:4px;color:var(--muted)">modules: ${[...r.modules].map(m => esc(SWN[m] ? SWN[m].name : m)).join(', ')} · cores: ${[...r.cores].sort().join(', ') || '—'}</div>`;
+  else vars = '<div class="muted">no shared variable touched</div>';
+  h += section('sec-vars', 'Shared memory / variables', `${r.vars.size}`, vars, r.vars.size > 0);
+  let io = '';
+  if (r.ipc.size) io += `<div><b>IPC</b> ${[...r.ipc].map(([ch, ops]) => `<code>${esc(ch)}</code> (${ops.map(o => o.macro.replace('IPC_', '').toLowerCase() + ' in ' + short(o.fid)).join(', ')})`).join(' · ')}</div>`;
+  if (r.heap.length) io += `<div><b>Heap</b> ${r.heap.map(u => `<code>${esc(short(u.fid))}</code> → ${u.calls.map(c => esc(c.fn)).join(', ')}`).join(' · ')}</div>`;
+  if (io) h += section('sec-io', 'IPC / heap', `${r.ipc.size + r.heap.length}`, io, true);
+  h += section('sec-fns', 'Functions', `${r.fids.size}`, `<div class="fnlist">${[...r.fids].map(f => `<span class="b ${f === S.selFid ? '' : 'ext'} fnb" data-fid="${esc(f)}">${esc(short(f))}</span>`).join(' ')}</div>` +
+    `<div class="muted">modules: ${[...r.modules].map(m => esc(SWN[m] ? SWN[m].name : m)).join(', ')} · cores: ${[...r.cores].sort().join(', ') || '—'}</div>`, false);
   return h;
 }
 function varUsers(v) {
@@ -187,6 +219,10 @@ function renderDetail() {
   el.querySelectorAll('.fnb').forEach(b => b.addEventListener('click', () => selectNode(findPath(b.dataset.fid), b.dataset.fid)));
   el.querySelectorAll('.blkl').forEach(b => b.addEventListener('click', () => selectBlock(b.dataset.block)));
   el.querySelectorAll('.ndl').forEach(b => b.addEventListener('click', () => selectSwNode(b.dataset.node)));
+  el.querySelectorAll('.rel-row[data-node]').forEach(b => b.addEventListener('click', () => selectSwNode(b.dataset.node)));
+  el.querySelectorAll('.rel-row[data-block]').forEach(b => { if (b.dataset.block) b.addEventListener('click', () => selectBlock(b.dataset.block)); });
+  // remember which sections are open
+  el.querySelectorAll('details.sub').forEach(d => { if (S.secOpen && d.id in S.secOpen) d.open = S.secOpen[d.id]; d.addEventListener('toggle', () => { S.secOpen = S.secOpen || {}; S.secOpen[d.id] = d.open; }); });
 }
 function blockEvents(b) {   // events of the shown instance of every visible ISR that touch block b
   const out = [];

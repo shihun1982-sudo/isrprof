@@ -102,6 +102,9 @@ def check(report: dict) -> list[str]:
         bad.append("unrelated SW / HW boxes were not dimmed")
     if sel.get("outline") is False:
         bad.append("selection outline not shown in the 3D diagram")
+    ds = st.get("details sections", {})
+    if ds and not (ds.get("swFirst") and ds.get("swRows", 0) > 0 and ds.get("swAncestors", 0) > 0 and ds.get("hwRows", 0) > 0 and ds.get("regs", 0) > 0 and ds.get("collapsible")):
+        bad.append(f"details sections (SW hierarchy first, HW second, collapsible) not as expected: {ds}")
     only = st.get("focus: this function only", {})
     if only.get("fids") != 1:
         bad.append(f"'this function only' should relate exactly one function, got {only.get('fids')}")
