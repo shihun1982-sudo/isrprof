@@ -110,6 +110,13 @@ def check(report: dict) -> list[str]:
         bad.append(f"call-graph level did not change the tree: {l0.get('treeRows')} / {l2.get('treeRows')} / {l6.get('treeRows')}")
     if not (l0.get("boxes", 0) < l6.get("boxes", 0)):
         bad.append(f"call-graph level did not change the boxes drawn: {l0.get('boxes')} / {l6.get('boxes')}")
+    cg = st.get("click call-graph row", {})
+    if cg and not (cg.get("treeRows") == cg.get("treeNodes") and cg.get("leafRows", 0) > 0):
+        bad.append(f"call graph at 'all levels' does not list every node down to the leaves: {cg}")
+    if cg and not (cg.get("selFid") == cg.get("clicked") and cg.get("swRel", 0) > 0 and cg.get("hwRel", 0) > 0 and cg.get("swDim", 0) > 0):
+        bad.append(f"clicking a call-graph row did not highlight the SW / HW structures: {cg}")
+    if cg and not (cg.get("detailsSW") and cg.get("detailsHW")):
+        bad.append(f"details did not list the SW / HW relations of the clicked function: {cg}")
     nested = next((s for s in report["steps"] if s["name"].startswith("select nested box")), {})
     if not nested.get("crumbs"):
         bad.append("selecting a nested box did not show the breadcrumb to its ISR")

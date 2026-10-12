@@ -255,6 +255,17 @@ function selfTest() {
   const deepNode = isr.flat.find(r => r.depth >= 2 && r.n.hw_events.length) || isr.flat[isr.flat.length - 1];
   step('select nested box ' + deepNode.n.name, () => { const p = isr.name + '#' + shownInst(isr).k + deepNode.key.slice(isr.name.length); selectNode(p, deepNode.n.fid); return { fids: REL.fids.size, blocks: REL.blocks.size, crumbs: document.querySelectorAll('#tree-body .crumb').length, swRel: swCount('rel-x') + swCount('rel-r') + swCount('rel-w') + swCount('rel-rw'), hwRel: hwCount('rel-r') + hwCount('rel-w') + hwCount('rel-rw') + hwCount('rel-miss') }; });
   const withKids = isr.flat.find(r => r.kids && r.depth >= 1) || isr.flat[0];
+  step('click call-graph row', () => {
+    clearFocus(); setLevel(30);                                   // every level open: the tree reaches the leaves
+    const rows = [...document.querySelectorAll('#tree-body .row')], leafRows = rows.filter(r => r.querySelector('.car').textContent.trim() === '·');
+    const nodes = P.isrs.filter(i => S.cores.has(i.core)).reduce((a, i) => a + i.flat.length, 0);
+    const target = rows.find(r => { const f = F[r.dataset.fid]; return f && f.hw.length && r.dataset.path.split('/').length > 2; }) || rows[rows.length - 1];
+    target.click();                                               // a real click on a nested function row
+    const swRel = swCount('rel-x') + swCount('rel-r') + swCount('rel-w') + swCount('rel-rw'), hwRel = hwCount('rel-r') + hwCount('rel-w') + hwCount('rel-rw') + hwCount('rel-miss');
+    const det = document.getElementById('detail-body').textContent;
+    const r = { treeRows: rows.length, leafRows: leafRows.length, treeNodes: nodes, clicked: target.dataset.fid, selFid: S.selFid, swRel, hwRel, swDim: swCount('dim'), hwDim: hwCount('dim'),
+      detailsSW: det.includes('SW STRUCTURE') || det.includes('SW structure'), detailsHW: det.includes('HW STRUCTURE') || det.includes('HW structure'), detailTables: document.querySelectorAll('#detail-body table').length };
+    setLevel(2); clearFocus(); return r; });
   step('toggle expand on a box with callees', () => { const p = isr.name + '#' + shownInst(isr).k + withKids.key.slice(isr.name.length); selectNode(p, withKids.n.fid); const before = stats().boxes, wasOpen = isExp(p); toggleExp(p); renderAll(); const after = stats().boxes; toggleExp(p); renderAll(); return { node: withKids.n.name, wasOpen, boxesBefore: before, boxesAfter: after, boxesRestored: stats().boxes }; });
   step('sw depth 1', () => { setSwDepth(1); return { swBoxes: document.querySelectorAll('#sw .nd').length }; });
   step('sw depth 4', () => { setSwDepth(4); return { swBoxes: document.querySelectorAll('#sw .nd').length, swItems: document.querySelectorAll('#sw .it').length }; });
