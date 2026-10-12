@@ -74,18 +74,18 @@ function panZoom(host, svg, w, h) {
 function renderNested(host, spec) {
   // spec: {byId, roots, anc, depth, open, closed, cols, itemsOf, itemsDefault, kindOf, labelOf, subOf, edges:[{from,to,kind,label}], leafW, onToggle, onSelect, onItem, tipNode, tipItem, extraClass}
   const W = Math.max(host.clientWidth || 900, 320);
-  const opt = { depth: spec.depth, open: spec.open, closed: spec.closed, pageW: W - 8, cols: spec.cols || 4, leafW: spec.leafW || 190, minColW: spec.minColW || 150, leafH: 34, pad: 8, header: 26, itemsOf: spec.itemsOf, itemsDefault: spec.itemsDefault, itemH: 15 };
+  const opt = { depth: spec.depth, open: spec.open, closed: spec.closed, pageW: W - 8, cols: spec.cols || 4, leafW: spec.leafW || 190, minColW: spec.minColW || 140, leafH: 30, pad: 6, header: 22, itemsOf: spec.itemsOf, itemsDefault: spec.itemsDefault, itemH: 13 };
   const layout = nestedLayout(spec.byId, spec.roots, opt);
   const boxes = layout.boxes, out = [], items = new Map(), boxEl = new Map();
   const ordered = [...boxes.values()].sort((a, b) => a.node.depth - b.node.depth);
   for (const b of ordered) {
     const n = b.node, kind = spec.kindOf(n), cnt = spec.countOf ? spec.countOf(n) : '';
     out.push(`<g class="nd k-${esc(kind)} d${Math.min(n.depth, 2)} ${spec.extraClass ? spec.extraClass(n) : ''}" data-id="${esc(n.id)}"><rect class="bx" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="5"/>` +
-      `<text class="ttl" x="${b.x + 8}" y="${b.y + 15}">${b.node.children.length ? (b.open ? '▾ ' : '▸ ') : ''}${esc(fitText(spec.labelOf(n), b.w - 58, n.depth === 0 ? 7.2 : 6.6))}</text>` +
-      `<text class="sub" x="${b.x + 8}" y="${b.y + 28}">${esc(fitText(spec.subOf(n, b), b.w - 14, 6.0))}</text><text class="cnt" x="${b.x + b.w - 6}" y="${b.y + 15}"></text>`);
+      `<text class="ttl" x="${b.x + 7}" y="${b.y + 13}">${b.node.children.length ? (b.open ? '▾ ' : '▸ ') : ''}${esc(fitText(spec.labelOf(n), b.w - 52, n.depth === 0 ? 6.4 : 6.1))}</text>` +
+      `<text class="sub" x="${b.x + 7}" y="${b.y + 24}">${esc(fitText(spec.subOf(n, b), b.w - 12, 5.4))}</text><text class="cnt" x="${b.x + b.w - 5}" y="${b.y + 13}"></text>`);
     b.items.forEach((it, i) => {
       const iy = b.y + opt.leafH + i * opt.itemH;
-      out.push(`<g class="it ${it.cls || ''}" data-id="${esc(it.id)}" data-node="${esc(n.id)}"><rect x="${b.x + 4}" y="${iy}" width="${b.w - 8}" height="${opt.itemH - 1}" rx="3"/><text x="${b.x + 10}" y="${iy + 11}">${esc(fitText(it.label, b.w - 48, 6.3))}</text><text class="itag" x="${b.x + b.w - 8}" y="${iy + 11}" text-anchor="end"></text></g>`);
+      out.push(`<g class="it ${it.cls || ''}" data-id="${esc(it.id)}" data-node="${esc(n.id)}"><rect x="${b.x + 4}" y="${iy}" width="${b.w - 8}" height="${opt.itemH - 1}" rx="3"/><text x="${b.x + 9}" y="${iy + 10}">${esc(fitText(it.label, b.w - 44, 5.7))}</text><text class="itag" x="${b.x + b.w - 7}" y="${iy + 10}" text-anchor="end"></text></g>`);
       items.set(it.id, { node: n.id, it });
     });
     out.push('</g>');
