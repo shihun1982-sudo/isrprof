@@ -30,24 +30,24 @@ body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-s
 h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
 button, select, input { font: inherit; color: inherit; }
 code, .mono { font-family: var(--mono); font-size: 12px; }
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-block: 6px 4px; border-bottom: 1px solid var(--line); }
-.top h1 { font-size: 17px; letter-spacing: -0.01em; }
-.top .sub { color: var(--muted); font-weight: 400; margin-left: 8px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12px; white-space: nowrap; }
-.chip b { font-weight: 500; font-family: var(--mono); font-size: 11.5px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding-block: 3px 2px; border-bottom: 1px solid var(--line); }
+.top h1 { font-size: 14px; letter-spacing: -0.01em; }
+.top .sub { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 12.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 11px; line-height: 17px; white-space: nowrap; }
+.chip b { font-weight: 500; font-family: var(--mono); font-size: 10.5px; }
 .tabs { margin-left: auto; display: flex; gap: 4px; }
-.tabs button { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 11px; cursor: pointer; color: var(--muted); }
+.tabs button { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 9px; cursor: pointer; color: var(--muted); font-size: 12px; }
 .tabs button[aria-selected="true"] { background: var(--panel); border-color: var(--line); color: var(--fg); box-shadow: var(--shadow); }
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-block: 4px; }
-.controls .group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.controls label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding-block: 2px; }
+.controls .group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.controls label { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
 .controls .info { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
-.tog { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.tog { border: 1px solid var(--line); background: var(--panel); border-radius: 5px; padding: 1px 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 17px; }
 .tog[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .tog .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 select.tog { padding-block: 3px; }
-input[type="range"] { vertical-align: middle; width: 110px; accent-color: var(--accent); }
+input[type="range"] { vertical-align: middle; width: 80px; accent-color: var(--accent); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-top: 4px; box-shadow: var(--shadow); }
 .panel > summary { cursor: pointer; padding: 3px 10px; font-weight: 600; display: flex; align-items: center; gap: 10px; list-style: none; flex-wrap: nowrap; min-height: 22px; font-size: 12.5px; }
 .panel > summary::-webkit-details-marker { display: none; }
@@ -62,8 +62,11 @@ input[type="range"] { vertical-align: middle; width: 110px; accent-color: var(--
 .stack .panel { margin-top: 0; }
 .stack .panel .body.strip { padding: 4px 0 2px; }
 .strip .hint { padding-left: 8px; }
-.panel.ctl { margin-top: 4px; }
-.panel.ctl .body.controls { padding: 2px 10px 6px; }
+.panel.ctl { margin-top: 2px; }
+.panel.ctl > summary { padding: 1px 8px; min-height: 18px; font-size: 11.5px; }
+.panel.ctl > summary .hint { display: none; }
+.panel.ctl > summary:hover .hint { display: inline; }
+.panel.ctl .body.controls { padding: 0 8px 3px; }
 .stack .panel .body.scene-body { padding: 0; }
 #scene { position: relative; height: 640px; background: var(--panel); border: 0; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; overflow: hidden; touch-action: none; }
 #scene canvas { display: block; }
@@ -171,16 +174,16 @@ table.t tr.viol td { color: var(--critical); }
 .diagram .empty { padding: 14px; color: var(--muted); font-size: 12px; }
 .pz { margin-left: auto; display: inline-flex; gap: 4px; }
 .pz .tog { font-size: 11px; padding: 1px 7px; }
-.tog.num { width: 54px; text-align: center; }
+.tog.num { width: 48px; text-align: center; }
 
 /* checkbox groups, ISR popover, slot inputs */
 .checks { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
 .checks.col { flex-direction: column; gap: 2px; }
-.checks label { display: inline-flex; align-items: center; gap: 5px; text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--fg); cursor: pointer; white-space: nowrap; }
+.checks label { display: inline-flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--fg); cursor: pointer; white-space: nowrap; }
 .checks input { accent-color: var(--accent); margin: 0; }
 .checks .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .checks .dash, label.chk .dash { width: 14px; height: 0; border-top: 2px dashed currentColor; display: inline-block; background: none !important; }
-label.chk { display: inline-flex; align-items: center; gap: 5px; text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--fg); cursor: pointer; }
+label.chk { display: inline-flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--fg); cursor: pointer; }
 label.chk input { accent-color: var(--accent); margin: 0; }
 #legend .dash { display: inline-block; width: 14px; height: 0; border-top: 2px dashed currentColor; margin-right: 4px; vertical-align: 3px; }
 .tog.mini { padding: 1px 6px; font-size: 11px; }
