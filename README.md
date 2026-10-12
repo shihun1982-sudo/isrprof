@@ -27,7 +27,9 @@ reference lines of `timing.yaml` (`references`: NW ± offset, one colour each, l
 in the controls) and, in red, the HW block deadlines of `hw_structure.yaml` drawn per ISR instance. Clicking a SW block
 in the timing diagram (a function box or an ISR row) focuses it: the SW structure highlights every box it
 executes in (■) / reads (r) / writes (w), the HW structure every block it touches (R / W, ✗ for deadline
-misses), the call graph on the right shows its subtree, and Details lists the function-level relations.
+misses), the call graph on the right shows the ISR's tree with the function selected (selecting never re-roots the tree;
+*pin … as root* keeps a function at the top while you walk its callees, ▲ caller / ▼ callee / ◁ ▷ move the
+selection one call at a time), and Details lists the function-level relations.
 *this function only* vs *include callees to leaves* decides whether the focus is the function or its whole
 call closure; *call graph level* sets how many levels unfold (every node can still be expanded / collapsed
 individually); *SW depth* / *HW depth* set how deep the structure diagrams nest.

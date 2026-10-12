@@ -67,6 +67,7 @@ const fnOf = fid => F[fid] || null;
 const EXPAND_DEPTH = Math.max(0, +(V.expand_depth == null ? 2 : V.expand_depth));
 const S = {
   unit: V.unit === 'us' ? 'us' : 'sym', cores: new Set(CORES.map(c => c.id)), isrs: null,   // isrs: null = all, else Set of ISR names
+  pinPath: null,             // call-graph panel: function kept as the root of the tree (null = the ISR entry)
   refHidden: new Set(), showDeadlines: true,   // reference lines switched off in the controls; HW deadline ticks on / off
   overlap: Math.max(0, Math.min(0.85, +(V.stack_overlap == null ? 0.5 : V.stack_overlap))),   // stacked view: how much a core plane covers the one behind
   level: EXPAND_DEPTH,       // call-tree levels open below the entry (node at depth d is open iff d < level)

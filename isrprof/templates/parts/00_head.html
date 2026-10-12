@@ -203,6 +203,9 @@ label.chk input { accent-color: var(--accent); margin: 0; }
 @media (max-width: 1000px) { #splitter { display: none; } }
 #tree, #detail { max-height: none; }
 
+.cgnav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 2px; }
+.cgnav .tog.mini:disabled { opacity: .4; cursor: default; }
+.crumbs { margin-top: 2px; } .crumb { cursor: pointer; color: var(--accent); } .crumb:hover { text-decoration: underline; }
 /* Structure tab */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }

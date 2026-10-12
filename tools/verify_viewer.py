@@ -110,6 +110,13 @@ def check(report: dict) -> list[str]:
         bad.append(f"call-graph level did not change the tree: {l0.get('treeRows')} / {l2.get('treeRows')} / {l6.get('treeRows')}")
     if not (l0.get("boxes", 0) < l6.get("boxes", 0)):
         bad.append(f"call-graph level did not change the boxes drawn: {l0.get('boxes')} / {l6.get('boxes')}")
+    pc = st.get("call graph: pin / caller / callee", {})
+    if pc and (pc.get("selectedIsRoot") or not pc.get("selVisible")):
+        bad.append(f"selecting a nested function re-rooted the call graph (or hid the selection): {pc}")
+    if pc and not pc.get("pinnedOk"):
+        bad.append(f"pinning did not make the selected function the root: {pc}")
+    if pc and not (pc.get("pinDroppedOnCaller") and pc.get("calleeDepth") == 1 and pc.get("afterNext", "").endswith("/1") and pc.get("rootStill") == pc.get("rootUnpinned")):
+        bad.append(f"caller / callee / sibling navigation did not behave: {pc}")
     cg = st.get("click call-graph row", {})
     if cg and not (cg.get("treeRows") == cg.get("treeNodes") and cg.get("leafRows", 0) > 0):
         bad.append(f"call graph at 'all levels' does not list every node down to the leaves: {cg}")
@@ -118,8 +125,8 @@ def check(report: dict) -> list[str]:
     if cg and not (cg.get("detailsSW") and cg.get("detailsHW")):
         bad.append(f"details did not list the SW / HW relations of the clicked function: {cg}")
     nested = next((s for s in report["steps"] if s["name"].startswith("select nested box")), {})
-    if not nested.get("crumbs"):
-        bad.append("selecting a nested box did not show the breadcrumb to its ISR")
+    if nested.get("crumbs", 0) != 0:
+        bad.append("breadcrumbs shown although no function is pinned as root")
     tog = st.get("toggle expand on a box with callees", {})
     if tog.get("boxesBefore") == tog.get("boxesAfter") or tog.get("boxesRestored") != tog.get("boxesBefore"):
         bad.append(f"expand / collapse on a box did not change (and restore) the diagram: {tog}")

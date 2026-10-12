@@ -266,6 +266,17 @@ function selfTest() {
     const r = { treeRows: rows.length, leafRows: leafRows.length, treeNodes: nodes, clicked: target.dataset.fid, selFid: S.selFid, swRel, hwRel, swDim: swCount('dim'), hwDim: hwCount('dim'),
       detailsSW: det.includes('SW STRUCTURE') || det.includes('SW structure'), detailsHW: det.includes('HW STRUCTURE') || det.includes('HW structure'), detailTables: document.querySelectorAll('#detail-body table').length };
     setLevel(2); clearFocus(); return r; });
+  step('call graph: pin / caller / callee', () => {
+    const root = isr.name + '#' + shownInst(isr).k, deep = isr.flat.find(r => r.depth >= 2) || isr.flat[isr.flat.length - 1];
+    selectNode(root + deep.key.slice(isr.name.length), deep.n.fid);
+    const first = () => document.querySelector('#tree-body .row').dataset.fid, selRow = () => document.querySelector('#tree-body .row.sel');
+    const r = { rootUnpinned: first(), selectedIsRoot: first() === deep.n.fid, selVisible: !!selRow() };
+    const pin = document.getElementById('pin-root'); pin.checked = true; pin.dispatchEvent(new Event('change'));
+    r.rootPinned = first(); r.pinnedOk = r.rootPinned === deep.n.fid;
+    document.getElementById('nav-caller').click(); r.afterCaller = S.selPath; r.pinDroppedOnCaller = S.pinPath === null;
+    selectNode(root, isr.tree.fid); document.getElementById('nav-callee').click(); r.afterCallee = S.selPath; r.calleeDepth = S.selPath.split('/').length - 1;
+    document.getElementById('nav-next').click(); r.afterNext = S.selPath; r.rootStill = first();
+    clearFocus(); return r; });
   step('toggle expand on a box with callees', () => { const p = isr.name + '#' + shownInst(isr).k + withKids.key.slice(isr.name.length); selectNode(p, withKids.n.fid); const before = stats().boxes, wasOpen = isExp(p); toggleExp(p); renderAll(); const after = stats().boxes; toggleExp(p); renderAll(); return { node: withKids.n.name, wasOpen, boxesBefore: before, boxesAfter: after, boxesRestored: stats().boxes }; });
   step('sw depth 1', () => { setSwDepth(1); return { swBoxes: document.querySelectorAll('#sw .nd').length }; });
   step('sw depth 4', () => { setSwDepth(4); return { swBoxes: document.querySelectorAll('#sw .nd').length, swItems: document.querySelectorAll('#sw .it').length }; });

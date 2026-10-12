@@ -4,11 +4,25 @@ function renderTree() {
   let html = '';
   if (S.selPath && nodeAt(S.selPath)) {
     const isr = isrOfPath(S.selPath), list = instancesOf(isr), inst = shownInst(isr), idx = list.findIndex(i => i.k === inst.k);
-    const crumbs = []; const parts = S.selPath.split('/'); for (let i = 1; i < parts.length; i++) { const p = parts.slice(0, i).join('/'); const n = nodeAt(p); if (n) crumbs.push(`<span class="crumb" data-path="${esc(p)}">${esc(n.name)}</span>`); }
+    const isrRoot = S.selPath.split('/')[0];
+    // root of the tree: the pinned function (while the selection stays inside its subtree), otherwise the ISR entry;
+    // the selection is only highlighted, it never re-roots the tree by itself
+    if (S.pinPath && !(S.selPath === S.pinPath || S.selPath.startsWith(S.pinPath + '/'))) S.pinPath = null;
+    const rootPath = S.pinPath || isrRoot;
+    // every ancestor between the root and the selection is opened so the selected row is visible
+    const parts = S.selPath.split('/'); let changed = false;
+    for (let i = rootPath.split('/').length; i < parts.length; i++) { const p = parts.slice(0, i).join('/'); const n = nodeAt(p); if (n && n.children.length && !isExp(p)) { S.collapsed.delete(expKey(p)); S.expanded.add(expKey(p)); changed = true; } }
+    if (changed) bumpExp();
+    const crumbs = []; for (let i = 1; i < rootPath.split('/').length; i++) { const p = parts.slice(0, i).join('/'); const n = nodeAt(p); if (n) crumbs.push(`<span class="crumb" data-path="${esc(p)}">${esc(n.name)}</span>`); }
+    const sel = nodeAt(S.selPath), hasParent = parts.length > 1, hasChild = sel.children.length > 0;
     const bar = `<div class="instbar">${esc(isr.name)} · instance ${idx + 1}/${list.length} (#${inst.k}) · ${fmtAbs(inst.start)}` +
       (list.length > 1 ? ` <button class="tog" data-isr="${esc(isr.name)}" data-step="-1" title="previous instance">◂</button><button class="tog" data-isr="${esc(isr.name)}" data-step="1" title="next instance">▸</button>` : '') +
+      `<div class="cgnav"><label class="chk" title="keep the selected function as the top of this tree while you walk down its callees"><input type="checkbox" id="pin-root" ${S.pinPath ? 'checked' : ''}>pin <b>${esc(short(S.selFid))}</b> as root</label>` +
+      `<button class="tog mini" id="nav-caller" ${hasParent ? '' : 'disabled'} title="move the selection to the caller (one level up)">▲ caller</button>` +
+      `<button class="tog mini" id="nav-callee" ${hasChild ? '' : 'disabled'} title="move the selection to the first callee (one level down)">▼ callee</button>` +
+      `<button class="tog mini" id="nav-prev" title="previous sibling call">◁</button><button class="tog mini" id="nav-next" title="next sibling call">▷</button></div>` +
       (crumbs.length ? `<div class="crumbs">${crumbs.join(' › ')} ›</div>` : '') + '</div>';
-    html = `<ul>${treeItem(nodeAt(S.selPath), S.selPath, isr, parts.length === 1, inst.k, bar, 0)}</ul>`;
+    html = `<ul>${treeItem(nodeAt(rootPath), rootPath, isr, rootPath === isrRoot, inst.k, bar, 0)}</ul>`;
   } else if (S.selFid && fnOf(S.selFid)) {
     html = `<div class="instbar">${esc(short(S.selFid))} · static call tree (not reached by a visible ISR)</div><ul>${staticItem(S.selFid, S.selFid, 0, new Set())}</ul>`;
   } else {
@@ -28,7 +42,13 @@ function renderTree() {
   });
   el.querySelectorAll('.srow').forEach(r => r.addEventListener('click', () => selectNode(findPath(r.dataset.fid), r.dataset.fid)));
   el.querySelectorAll('.crumb').forEach(c => c.addEventListener('click', () => { const n = nodeAt(c.dataset.path); selectNode(c.dataset.path, n.fid); }));
-  el.querySelectorAll('.instbar button').forEach(b => b.addEventListener('click', () => {
+  const pin = el.querySelector('#pin-root'); if (pin) pin.addEventListener('change', () => { S.pinPath = pin.checked ? S.selPath : null; renderTree(); });
+  const nav = (id, fn) => { const b = el.querySelector('#' + id); if (b) b.addEventListener('click', e => { e.stopPropagation(); const p = fn(); if (p && nodeAt(p)) selectNode(p, nodeAt(p).fid); }); };
+  nav('nav-caller', () => { const parts = S.selPath.split('/'); return parts.length > 1 ? parts.slice(0, -1).join('/') : null; });
+  nav('nav-callee', () => { const n = nodeAt(S.selPath); if (!n || !n.children.length) return null; if (!isExp(S.selPath)) toggleExp(S.selPath); return S.selPath + '/0'; });
+  const sib = d => { const parts = S.selPath.split('/'); if (parts.length < 2) return null; const parent = nodeAt(parts.slice(0, -1).join('/')); const i = +parts[parts.length - 1] + d; return parent && i >= 0 && i < parent.children.length ? parts.slice(0, -1).join('/') + '/' + i : null; };
+  nav('nav-prev', () => sib(-1)); nav('nav-next', () => sib(1));
+  el.querySelectorAll('.instbar button[data-isr]').forEach(b => b.addEventListener('click', () => {
     const isr = ISRX[b.dataset.isr], list = instancesOf(isr), idx = list.findIndex(i => i.k === shownInst(isr).k);
     const nk = list[(idx + (+b.dataset.step) + list.length) % list.length].k;
     S.inst[isr.name] = nk;
