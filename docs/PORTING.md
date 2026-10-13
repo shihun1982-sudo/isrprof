@@ -91,6 +91,34 @@ profiles/<name>/
 
 `compile_commands.json`이 없을 때: `python tools/gen_compile_commands.py <root> <root>/build/compile_commands.json -DFOO=1 -I.` 로 만들 수 있습니다.
 
+### 3.2.1 build.yaml - deep (빌드 기반) 분석 토글
+
+```yaml
+deep:
+  enabled: true              # 끄면 토큰 파서만 사용 (실행 시 --deep / --no-deep 로도 전환)
+  backend: clang             # clang: libclang + compile_commands 플래그 + 크로스 타깃 (바이너리 생성 없음, Windows에서 ARM 트리 분석 가능)
+                             # objects: 실제 빌드(.o)를 toolchain nm / objdump 로 읽음 (툴체인 설치 필요)   both: 둘 다
+  scope: ["dl/**", "ul_core"]   # 깊게 분석할 범위: root 기준 glob 또는 SW 노드 id. 비우면 전체 TU. 큰 트리는 작업 중인 모듈만
+  exclude: []
+  target: arm-none-eabi      # clang --target
+  std_c: gnu11
+  std_cxx: c++17
+  sysroot: C:/tools/gcc-arm-none-eabi/arm-none-eabi   # 툴체인 헤더. 없으면 내장 freestanding 헤더로 파싱 계속
+  extra_args: ["-ffreestanding", "-fno-exceptions"]
+  jobs: 0                    # 병렬 TU 수 (0 = CPU-1)
+  cache: true                # TU별 캐시 (output/<name>/.cache/deep) - 재실행 시 바뀐 파일만
+  max_files: 0
+  build:                     # objects 백엔드
+    run: false               # cmake.configure + build_command 를 먼저 실행할지
+    objects: ["build/**/*.o"]
+    toolchain_prefix: arm-none-eabi-
+```
+
+결과 JSON의 `deep` 섹션에 백엔드·TU 수·정제/추가된 함수 수·캐시 적중·경고가 기록되고, 함수 테이블의 `precise`,
+`kind`(function/method/ctor/dtor/template), `cls`, `virtual`, `overrides`, 호출의 `kind`(direct/member/virtual/indirect/ctor)와
+후보 `callee_ids`가 채워집니다. `pip install libclang` 하나면 됩니다(DLL 포함). 토큰 파서 자체도 C++(클래스, `Class::method`,
+클래스 본문 안의 inline 메서드, 생성자 초기화 리스트, `f<T>(x)`, `obj.method()` 이름 매칭, 테이블·포인터 변수 호출)를 다룹니다.
+
 ### 3.3 sw_structure.yaml
 
 ```yaml
@@ -118,6 +146,9 @@ touch:                            # "touch"로 인식할 것
   access_macros:                                                    # 접근 매크로
     - { name: ASA_GET, rw: r, var: ASA, field_arg: 0 }              #   ASA_GET(dl.x)      -> read  ASA.dl.x
     - { name: SHM_WR,  rw: w, var_arg: 0, field_arg: 1 }            #   SHM_WR(ASA, ul.y, v) -> write ASA.ul.y
+  access_functions:                                                 # 접근 *함수*: 호출 간선 + 변수 접근을 함께 기록
+    - { name: shm_write, rw: w, var_arg: 0, field_arg: 1 }          #   shm_write(&g_x, field, v)
+    - { name: Mailbox::post, rw: w, var: g_mbox }                   #   고정 변수
   heap_functions: [malloc, calloc, pool_alloc, pool_free]
   ignore_vars: []
   ipc:
@@ -169,6 +200,9 @@ cost_model:
 depth: 2
 default_line: hw_ctrl                                 # line을 안 적은 블록의 기준선
 macros:
+  functions:                                           # 접근 함수: 호출 간선 + 레지스터 접근을 함께 기록
+    - { name: hal_fft_start, kind: write, block: FFT, reg: START }
+    - { name: hal_reg_write, kind: write, block_arg: 0, reg_arg: 1 }
   read: [HW_RD, HW_POLL]                              # HW_RD(<block>, <reg>)  — block_arg / reg_arg 위치
   write: [HW_WR]
   rmw: [HW_RMW]
@@ -275,6 +309,13 @@ output/<name>/
    - ISR 트리에 `ext` 배지가 많으면 함수 정의가 파싱 범위 밖 (`sources`에 추가)
    - `computed`가 모두 default 비용이면 `function_costs`/trace 보강
 6. 검증: `python -m unittest discover -s tests`, `python tools/check_js.py`, `python tools/verify_viewer.py output/<name>/profile.html`.
+
+## 6.1 Impact 분석 (Details › Impact)
+
+함수를 선택하면 Details에 Impact 섹션이 나옵니다.
+- **Used by**: 직접 호출자, 이 함수에 도달하는 ISR, 이 함수가 쓰는 변수의 소비자 / 읽는 변수의 생산자(ISR·코어·slot 내 시각).
+- **Remove**: 제거 시 깨지는 호출자, 어떤 ISR에서도 도달 불가가 되는 함수, 유일한 writer/reader를 잃는 변수, 더는 접근되지 않는 레지스터, ISR 소요 시간 변화(budget 대비).
+- **Move to ISR**: 대상 ISR과 위치(처음/끝)를 고르면 서브트리의 레지스터 접근을 새 시각으로 옮겨 데드라인을 다시 검사하고, 공유 변수의 갱신 순서(이 함수의 접근 vs 다른 함수의 접근)가 바뀌는 쌍에 ⚠, 코어가 바뀌어 cross-core가 되는 변수, 대상 ISR budget을 보여줍니다.
 
 ## 7. 알아둘 제약
 

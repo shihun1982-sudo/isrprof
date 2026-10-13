@@ -1,0 +1,4 @@
+#ifndef _ISRPROF_cassert
+#define _ISRPROF_cassert
+#include <assert.h>
+#endif

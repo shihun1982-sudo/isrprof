@@ -111,6 +111,9 @@ def check(report: dict) -> list[str]:
         bad.append(f"selection history back / forward did not restore the selections: {hb}")
     if hb and not (hb.get("vr", {}).get("fids", 0) > 1 and hb.get("vr", {}).get("detailHasUsers") and hb.get("ir", {}).get("fids", 0) > 0 and hb.get("backVar") == hb.get("vr", {}).get("selVar")):
         bad.append(f"variable / IPC selection did not focus their users: {hb}")
+    im = st.get("impact modes", {})
+    if im and not (im.get("usedbyRows", 0) >= 2 and im.get("removeHeads", 0) >= 4 and im.get("moveSelect") and im.get("moveHeads", 0) >= 3 and im.get("targetAfter") and im.get("targetAfter") != im.get("target")):
+        bad.append(f"impact analysis modes did not render: {im}")
     ds = st.get("details sections", {})
     if ds and not (ds.get("swFirst") and ds.get("swRows", 0) > 0 and ds.get("swAncestors", 0) > 0 and ds.get("hwRows", 0) > 0 and ds.get("regs", 0) > 0 and ds.get("collapsible")):
         bad.append(f"details sections (SW hierarchy first, HW second, collapsible) not as expected: {ds}")

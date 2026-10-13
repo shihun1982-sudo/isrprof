@@ -131,6 +131,21 @@ def resolve(base_dir: str, braw: dict | None, legacy_sources: list[str] | None =
     defines = {str(k): str(v) for k, v in (braw.get("defines") or {}).items()}
     per_file_defines = {u["file"]: u["defines"] for u in units}
     includes = sorted({i for u in units for i in u["includes"]} | {str(i) for i in (braw.get("include_dirs") or [])})
+    draw = braw.get("deep") or {}
+    deep = {
+        "enabled": bool(draw.get("enabled", False)),
+        "backend": str(draw.get("backend", "clang")),          # clang | objects | both
+        "scope": list(draw.get("scope") or []),                  # globs (relative to root) or SW node ids; empty = every TU
+        "exclude": list(draw.get("exclude") or []),
+        "target": draw.get("target"),                            # e.g. arm-none-eabi
+        "std": draw.get("std"), "std_c": draw.get("std_c"), "std_cxx": draw.get("std_cxx"),
+        "sysroot": draw.get("sysroot"),
+        "extra_args": list(draw.get("extra_args") or ["-ffreestanding"]),
+        "jobs": int(draw.get("jobs", 0) or 0),
+        "cache": bool(draw.get("cache", True)),
+        "max_files": int(draw.get("max_files", 0) or 0),
+        "build": dict(draw.get("build") or {}),                  # objects backend: run, objects globs, toolchain_prefix, nm, objdump, timeout
+    }
     parser = dict(braw.get("parser") or {})
     parser.setdefault("backend", "builtin")
     parser.setdefault("ignore_calls", ["sizeof", "memcpy", "memset", "assert", "ASSERT", "likely", "unlikely"])
@@ -142,7 +157,7 @@ def resolve(base_dir: str, braw: dict | None, legacy_sources: list[str] | None =
         "build_command": braw.get("build_command"),
         "compile_commands": cc_path, "translation_units": len(units),
         "defines": defines, "file_defines": per_file_defines, "include_dirs": includes,
-        "parser": parser, "cache": bool(braw.get("cache", True)),
+        "parser": parser, "cache": bool(braw.get("cache", True)), "deep": deep,
     }
 
 
@@ -153,4 +168,5 @@ def summary(build: dict) -> dict:
         "cmake": build["cmake"], "build_command": build["build_command"],
         "compile_commands": build["compile_commands"], "translation_units": build["translation_units"],
         "defines": build["defines"], "include_dirs": build["include_dirs"],
+        "deep": {k: v for k, v in build["deep"].items() if k != "build"} | {"build": {k: v for k, v in build["deep"]["build"].items() if k in ("run", "objects", "toolchain_prefix")}},
     }

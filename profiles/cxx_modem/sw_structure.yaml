@@ -1,0 +1,55 @@
+depth: 3
+auto_variables: cross_core
+nodes:
+  - id: dl_core
+    name: "DL core"
+    kind: subsystem
+    core: 0
+    children:
+      - id: dl_decoder
+        name: "Decoder pipeline (dl::)"
+        kind: module
+        files: ["dl/decoder.cpp", "dl/decoder.h"]
+        children:
+          - { id: stages, name: "Stage objects", kind: class, type: "dl::Stage", variables: [s_ldpc, s_crc, s_stages] }
+  - id: ul_core
+    name: "UL core"
+    kind: subsystem
+    core: 1
+    children:
+      - id: ul_fe
+        name: "UL front end (ul::fe)"
+        kind: module
+        files: ["ul/uplink.cpp"]
+        children:
+          - { id: ack_ring, name: "ACK ring buffer", kind: class, type: "ul::Ring<HarqAck,4>", variables: [s_acks] }
+  - id: platform
+    name: "Platform"
+    kind: subsystem
+    core: 0
+    children:
+      - { id: common, name: "Shared memory primitives", kind: module, files: ["common/*", "hal/*"] }
+  - id: shm
+    name: "Shared memory (shm::)"
+    kind: shared_memory
+    children:
+      - { id: g_timing,   kind: struct, type: "shm::Timing",  variables: [g_timing] }
+      - { id: g_harq_ack, kind: struct, type: "shm::HarqAck", variables: [g_harq_ack] }
+      - { id: g_grant,    kind: struct, type: "shm::Grant",   variables: [g_grant] }
+      - { id: state,      name: "shm::State (class statics)", kind: class, variables: ["State::frame_count", "State::agc_target_dbm"] }
+relations:
+  - { from: dl_decoder, to: g_harq_ack, kind: produces }
+  - { from: ul_fe, to: g_harq_ack, kind: consumes }
+touch:
+  heap_functions: [malloc, free, new, delete]
+  ipc:
+    macros: [IPC_SEND, IPC_RECV]
+    channel_arg: 0
+    channels: [{ id: CH_DL_TO_UL, from: 0, to: 1 }]
+architecture:
+  layers:
+    - { name: ISR, functions: ["*_isr"] }
+    - { name: Pipeline, functions: ["dl::*", "ul::*"] }
+    - { name: Platform, functions: ["ipc_*", "shm::*"] }
+  rules: []
+  fat_threshold: 10

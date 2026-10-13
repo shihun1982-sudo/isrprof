@@ -1,0 +1,36 @@
+# build.yaml - C++ sample: sources, compile database and the deep (build-based) analysis switch.
+root: ../../examples/cxx_modem
+sources:
+  - "**/*.cpp"
+  - "**/*.h"
+exclude: ["build/**"]
+cmake:
+  source_dir: .
+  build_dir: build
+  configure: "cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=arm-none-eabi.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+build_command: "cmake --build build"
+compile_commands: build/compile_commands.json
+parser:
+  ignore_calls: [sizeof, memcpy, memset, HW_REG]
+
+# ---------------------------------------------------------------- build-based deep analysis (toggle)
+deep:
+  enabled: true
+  backend: clang               # clang: libclang with the real flags (no binary needed, works on Windows for an ARM tree)
+                               # objects: run the build (deep.build.run) and read the .o files with the toolchain's nm / objdump
+                               # both: clang + objects (relocation edges the frontend could not see are added)
+  scope: []                    # globs relative to root or SW node ids, e.g. ["dl/**", "ul_core"]; empty = every translation unit
+  exclude: []
+  target: arm-none-eabi        # clang --target; the real project's triple (arm-none-eabi, armv7m-none-eabi, aarch64-none-elf ...)
+  std_cxx: c++17
+  std_c: gnu11
+  # sysroot: C:/tools/gcc-arm-none-eabi/arm-none-eabi      # toolchain headers (stdint.h, cmsis ...) for a complete parse
+  extra_args: ["-ffreestanding", "-fno-exceptions"]
+  jobs: 0                      # parallel translation units (0 = cpu count - 1)
+  cache: true                  # per-TU cache under <output>/.cache/deep (mtime + flags)
+  max_files: 0                 # 0 = no limit (useful for a first look at a huge tree)
+  build:                       # objects backend only
+    run: false                 # run cmake.configure + build_command before reading the objects
+    objects: ["build/**/*.o"]
+    toolchain_prefix: arm-none-eabi-
+    timeout: 3600

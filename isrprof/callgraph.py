@@ -60,15 +60,21 @@ class CallGraph:
         self.costs = costs                     # function id -> self cost in us
         self.by_name: dict[str, list[FunctionDef]] = {}
         self.by_id: dict[str, FunctionDef] = {}
+        self.by_short: dict[str, list[FunctionDef]] = {}
         for f in pr.functions:
             self.by_name.setdefault(f.name, []).append(f)
             self.by_id[f.id] = f
+            short = f.name.split('::')[-1]
+            if short != f.name:
+                self.by_short.setdefault(short, []).append(f)
         self.max_depth = int((cfg.parser.get("callgraph") or cfg.raw.get("callgraph", {}) or {}).get("max_depth", 24))
         self.block_deadlines = self._deadlines_nw()
 
     # ------------------------------------------------------------------ resolution
     def resolve(self, callee: str, from_file: str) -> FunctionDef | None:
-        cands = self.by_name.get(callee)
+        if callee in self.by_id:
+            return self.by_id[callee]
+        cands = self.by_name.get(callee) or self.by_short.get(callee)
         if not cands:
             return None
         for c in cands:
@@ -207,10 +213,10 @@ class CallGraph:
                 continue
             c = obj
             if c.indirect:
-                # call through a struct member / function pointer: expand every function that is
-                # referenced in a file-scope table of this file (stage / dispatch tables), in table order
-                cands = [self.resolve(nm, f.file) for nm in self.pr.table_refs.get(f.file, [])]
-                cands = [t for t in cands if t is not None and t.id not in stack and t.id != f.id]
+                # call through a member / function pointer / virtual method: explicit candidates (deep analysis),
+                # else every method of that name, else the file-scope dispatch tables of this file
+                cands = self._indirect_targets(c, f)
+                cands = [t for t in cands if t.id not in stack and t.id != f.id]
                 if cands:
                     for t in cands:
                         t_child = start + slice_us * seq + sum(ch.total_us for ch in node.children)
@@ -238,6 +244,21 @@ class CallGraph:
         node.total_us = self_us + sum(c.total_us for c in node.children)
         return node
 
+    def _indirect_targets(self, c, f: FunctionDef) -> list[FunctionDef]:
+        if getattr(c, 'candidates', None):
+            out = [self.resolve(x, f.file) for x in c.candidates]
+            return [t for t in out if t is not None]
+        if getattr(c, 'member', False):
+            # obj.method(): every method of that name (C++); a plain function of that name; else the file's dispatch tables (C)
+            methods = list(self.by_short.get(c.callee, []))
+            if methods:
+                return methods
+            direct = self.resolve(c.callee, f.file)
+            if direct is not None:
+                return [direct]
+        out = [self.resolve(nm, f.file) for nm in self.pr.table_refs.get(f.file, [])]
+        return [t for t in out if t is not None]
+
     # ------------------------------------------------------------------ all
     def build_all(self) -> list[dict]:
         return [self.build_isr(isr) for isr in self.cfg.isrs]
@@ -249,9 +270,8 @@ class CallGraph:
             outs = []
             for c in f.calls:
                 if c.indirect:
-                    for nm in self.pr.table_refs.get(f.file, []):
-                        t = self.resolve(nm, f.file)
-                        if t is not None and t.id != f.id:
+                    for t in self._indirect_targets(c, f):
+                        if t.id != f.id:
                             outs.append(t.id)
                     continue
                 t = self.resolve(c.callee, f.file)

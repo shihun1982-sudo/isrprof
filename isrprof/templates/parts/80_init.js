@@ -259,7 +259,16 @@ function selfTest() {
     const ch = P.memory.ipc_ops[0].channel; selectIpc(ch); const ir = { selIpc: S.selIpc, fids: REL ? REL.fids.size : 0 };
     histBack(); const backVar = S.selVar; selectNode(root, isr.tree.fid);          // leave the ISR root selected for the following steps
     return { atBlock, back1, back2, fwd, fwd2, vr, ir, backVar, buttons: !!document.getElementById('hist-back') }; });
-  step('details sections', () => { const secs = [...document.querySelectorAll('#detail-body details.sub')].map(d => d.id); const swRows = [...document.querySelectorAll('#sec-sw .rel-row')], anc = swRows.filter(r => r.classList.contains('anc')).length; const hwRows = document.querySelectorAll('#sec-hw .rel-row').length, regs = document.querySelectorAll('#sec-hw .rel-regs .reg').length; const d = document.getElementById('sec-sw'); d.open = false; const closed = !d.open; d.open = true; return { sections: secs, swFirst: secs[0] === 'sec-sw' && secs[1] === 'sec-hw', swRows: swRows.length, swAncestors: anc, hwRows, regs, collapsible: closed }; });
+  step('impact modes', () => {
+    const withCallers = Object.keys(F).find(f => (IX.callers[f] || []).length && isrOfFn(f).length) || isr.tree.fid;
+    selectNode(findPath(withCallers), withCallers);
+    const r = { fn: withCallers };
+    S.impactMode = 'usedby'; renderDetail(); r.usedbyRows = document.querySelectorAll('#sec-impact table tr').length; r.usedbyCallers = (IX.callers[withCallers] || []).length;
+    S.impactMode = 'remove'; renderDetail(); r.removeHeads = document.querySelectorAll('#sec-impact .imp-h').length; r.removeText = document.querySelector('#sec-impact .imp-body').textContent.slice(0, 80);
+    S.impactMode = 'move'; renderDetail(); r.moveSelect = !!document.getElementById('imp-target'); r.moveHeads = document.querySelectorAll('#sec-impact .imp-h').length; r.target = S.impactTarget;
+    const sel = document.getElementById('imp-target'); if (sel && sel.options.length > 1) { sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length; sel.dispatchEvent(new Event('change')); r.targetAfter = S.impactTarget; }
+    S.impactMode = 'usedby'; selectNode(isr.name + '#' + shownInst(isr).k, isr.tree.fid); return r; });
+  step('details sections', () => { const secs = [...document.querySelectorAll('#detail-body details.sub')].map(d => d.id); const swRows = [...document.querySelectorAll('#sec-sw .rel-row')], anc = swRows.filter(r => r.classList.contains('anc')).length; const hwRows = document.querySelectorAll('#sec-hw .rel-row').length, regs = document.querySelectorAll('#sec-hw .rel-regs .reg').length; const d = document.getElementById('sec-sw'); d.open = false; const closed = !d.open; d.open = true; return { sections: secs, swFirst: secs.indexOf('sec-sw') >= 0 && secs.indexOf('sec-sw') < secs.indexOf('sec-hw') && secs.indexOf('sec-impact') === 0, swRows: swRows.length, swAncestors: anc, hwRows, regs, collapsible: closed }; });
   step('focus: this function only', () => { setDeep(false); return { fids: REL.fids.size, blocks: REL.blocks.size }; });
   step('focus: include callees', () => { setDeep(true); return { fids: REL.fids.size, blocks: REL.blocks.size }; });
   step('level 0', () => { setLevel(0); return { treeRows: document.querySelectorAll('#tree-body .row').length, boxes: stats().boxes }; });

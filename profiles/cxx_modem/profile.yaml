@@ -1,0 +1,20 @@
+# isrprof profile: C++ modem sample (2 cores) with the build-based deep analysis switched on.
+# The sources are C++ (classes, virtual stage interface, templates, namespaces, class-static members);
+# build.yaml enables `deep` so the call graph comes from libclang with the compile_commands.json flags
+# (cross target arm-none-eabi) instead of the token parser alone.  Toggle: `python -m isrprof run cxx_modem --no-deep`.
+name: cxx_modem
+description: "C++ DL / UL sample (virtual stages, templates, class statics) analysed with the libclang deep backend"
+inputs:
+  build: build.yaml
+  sw_structure: sw_structure.yaml
+  timing: timing.yaml
+  hw_structure: hw_structure.yaml
+output:
+  dir: ../../output/cxx_modem
+viewer:
+  default_view: tilt
+  expand_depth: 2
+  sw_structure: { depth: 3, columns: 3 }
+  hw_structure: { depth: 2, columns: 3 }
+llm:
+  enabled: false

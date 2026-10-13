@@ -139,7 +139,7 @@ const swRoots = () => SWS.nodes.filter(n => !n.parent).map(n => n.id);
 const KIND_ABBR = { global: 'G', static: 'S', static_local: 'SL', extern: 'G' };
 function swItemsOf(n) {
   const out = [];
-  if (n.functions.length && !n.children.length) n.functions.forEach(f => { const fn = F[f]; const isIsr = P.isrs.some(i => i.entry === short(f)); out.push({ id: 'fn:' + f, label: (isIsr ? '⚡ ' : '') + short(f) + (fn && fn.hw.length ? ' ▣' + fn.hw.length : '') + (fn && fn.heap.length ? ' H' : '') + (fn && fn.ipc.length ? ' ⇄' : '') }); });
+  if (n.functions.length && !n.children.length) n.functions.forEach(f => { const fn = F[f]; const isIsr = P.isrs.some(i => i.entry === short(f)); out.push({ id: 'fn:' + f, label: (isIsr ? '▸ ' : '') + short(f) + (fn && fn.hw.length ? ' ▣' + fn.hw.length : '') + (fn && fn.heap.length ? ' H' : '') + (fn && fn.ipc.length ? ' ⇄' : '') }); });
   if (n.variables.length) n.variables.forEach(k => { const v = VARX[k]; out.push({ id: 'var:' + k, label: (v ? v.name : k) + (v ? ' · ' + (KIND_ABBR[v.kind] || v.kind) + (v.registered ? ' ®' : '') + (v.shared_across_cores ? ' ⚠' : '') + (Object.keys(v.fields || {}).length ? ' {' + Object.keys(v.fields).length + '}' : '') : ''), cls: v && v.shared_across_cores ? 'shared' : '' }); });
   return out;
 }

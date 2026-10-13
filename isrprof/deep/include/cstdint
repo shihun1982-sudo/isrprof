@@ -1,0 +1,4 @@
+#ifndef _ISRPROF_cstdint
+#define _ISRPROF_cstdint
+#include <stdint.h>
+#endif

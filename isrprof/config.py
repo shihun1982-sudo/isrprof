@@ -349,8 +349,15 @@ def build_config(raw: dict, meta: ProfileMeta) -> Config:
         "custom": [dict(name=str(m["name"]), kind=str(m.get("kind", "read")),
                         block_arg=(None if m.get("block_arg") is None else int(m["block_arg"])),
                         reg_arg=(None if m.get("reg_arg") is None else int(m["reg_arg"])),
-                        block=m.get("block"), block_from_reg=m.get("block_from_reg"))
-                   for m in (hm.get("custom", []) or [])],
+                        block=m.get("block"), block_from_reg=m.get("block_from_reg"), reg=m.get("reg"), function=False)
+                   for m in (hm.get("custom", []) or [])] +
+                  # access *functions* (hal_fft_start(), Reg::write(FFT, CTRL, v) ...): the call stays a call edge and is
+                  # also recorded as a register access of the configured block / register
+                  [dict(name=str(m["name"]), kind=str(m.get("kind", "write")),
+                        block_arg=(None if m.get("block_arg") is None else int(m["block_arg"])),
+                        reg_arg=(None if m.get("reg_arg") is None else int(m["reg_arg"])),
+                        block=m.get("block"), block_from_reg=m.get("block_from_reg"), reg=m.get("reg"), function=True)
+                   for m in (hm.get("functions", []) or hw_raw.get("access_functions", []) or [])],
         "block_aliases": {str(k): str(v) for k, v in (hw_raw.get("block_aliases", {}) or {}).items()},
     }
 
@@ -364,10 +371,15 @@ def build_config(raw: dict, meta: ProfileMeta) -> Config:
         "ignore_vars": list(mem.get("ignore_vars", [])),
         "globals": [dict(name=str(g["name"]), kind=str(g.get("kind", "global")), note=str(g.get("note", "")))
                     for g in (mem.get("globals", []) or [])],
-        "access_macros": [dict(name=str(m["name"]), rw=str(m.get("rw", "r")), var=m.get("var"),
+        "access_macros": [dict(name=str(m["name"]), rw=str(m.get("rw", "r")), var=m.get("var"), field=m.get("field"),
                                var_arg=(None if m.get("var_arg") is None else int(m["var_arg"])),
-                               field_arg=(None if m.get("field_arg") is None else int(m["field_arg"])))
-                          for m in (mem.get("access_macros", []) or [])],
+                               field_arg=(None if m.get("field_arg") is None else int(m["field_arg"])), function=False)
+                          for m in (mem.get("access_macros", []) or [])] +
+                         # access functions for shared SW blocks (shm_write(&g_x, v), Mailbox::post(...)): call edge + variable access
+                         [dict(name=str(m["name"]), rw=str(m.get("rw", "w")), var=m.get("var"), field=m.get("field"),
+                               var_arg=(None if m.get("var_arg") is None else int(m["var_arg"])),
+                               field_arg=(None if m.get("field_arg") is None else int(m["field_arg"])), function=True)
+                          for m in (mem.get("access_functions", []) or [])],
         "auto_variables": str(sw_raw.get("auto_variables", "cross_core")),   # cross_core | all | none
     }
     # variables named by SW nodes are tracked even when defined outside the sources

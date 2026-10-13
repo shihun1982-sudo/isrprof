@@ -20,12 +20,15 @@ def main(argv: list[str]) -> int:
     root, out = os.path.abspath(argv[0]), argv[1]
     flags = " ".join(argv[2:])
     entries = []
-    for f in sorted(glob.glob(os.path.join(root, "**", "*.c"), recursive=True)):
+    files = []
+    for ext in ("*.c", "*.cc", "*.cpp", "*.cxx"):
+        files += glob.glob(os.path.join(root, "**", ext), recursive=True)
+    for f in sorted(files):
         rel = os.path.relpath(f, root).replace("\\", "/")
         if rel.startswith("build/"):
             continue
         entries.append({"directory": ".", "file": rel,
-                        "command": f"cc {flags} -O2 -c {rel} -o build/{os.path.basename(rel)}.o"})
+                        "command": f"{'c++' if not rel.endswith('.c') else 'cc'} {flags} -O2 -c {rel} -o build/{os.path.basename(rel)}.o"})
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(entries, fh, indent=1)

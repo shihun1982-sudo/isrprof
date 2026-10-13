@@ -1,0 +1,26 @@
+depth: 2
+default_line: hw_rx
+macros:
+  read: [HW_RD, HW_POLL]
+  write: [HW_WR]
+  rmw: []
+  block_arg: 0
+  reg_arg: 1
+nodes:
+  - id: rx
+    name: "RX chain"
+    kind: chain
+    children:
+      - { id: FFT,  name: "FFT",          base: 0x50011000, line: hw_rx, regs: [CTRL, START, STATUS], deadline: { at: "0.5 symbol", period: "1 symbol" } }
+      - { id: LDPC, name: "LDPC decoder", base: 0x50018000, line: hw_rx, regs: [CTRL, START, STATUS], deadline: { at: "14.9 symbol", period: "1 slot" } }
+  - id: tx
+    name: "TX chain"
+    kind: chain
+    children:
+      - { id: RFIC, name: "RF transceiver", base: 0x50003000, line: hw_tx, regs: [RX_GAIN, TA], deadline: { at: "0.7 symbol", period: "1 symbol" } }
+      - { id: IFFT, name: "IFFT",           base: 0x50024000, line: hw_tx, regs: [CTRL, START], deadline: { at: "0.5 symbol", period: "1 symbol" } }
+      - { id: DMA,  name: "DMA",            base: 0x50002000, line: hw_tx, regs: [SRC, CTRL] }
+links:
+  - { from: FFT, to: LDPC }
+  - { from: IFFT, to: RFIC }
+  - { from: DMA, to: IFFT, kind: dma }

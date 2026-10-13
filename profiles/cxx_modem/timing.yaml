@@ -1,0 +1,32 @@
+numerology: { mu: 1, symbols_per_slot: 14 }
+cores:
+  - { id: 0, name: "Core0 DL", clock_mhz: 1200 }
+  - { id: 1, name: "Core1 UL", clock_mhz: 1200 }
+references:
+  - { id: nw,     name: "NW timing", offset: "0 symbol",    kind: ref }
+  - { id: dl_rtg, name: "DL RTG",    offset: "-0.3 symbol", kind: sw }
+  - { id: ul_rtg, name: "UL RTG",    offset: "+2 symbol",   kind: sw }
+  - { id: hw_rx,  name: "HW REF RX", offset: "-0.45 symbol", kind: hw }
+  - { id: hw_tx,  name: "HW REF TX", offset: "+1.8 symbol", kind: hw }
+channels:
+  tdd_pattern: "DDDSU"
+  items:
+    - { id: PDCCH, dir: dl, symbols: [0, 2], slots: dl }
+    - { id: PDSCH, dir: dl, symbols: [2, 12], slots: dl }
+    - { id: PUSCH, dir: ul, symbols: [0, 12], slots: ul }
+    - { id: PUCCH, dir: ul, symbols: [12, 2], slots: ul }
+isrs:
+  - { name: DL_SYMBOL_ISR, core: 0, timing: dl_rtg, entry: dl_symbol_isr, start: "0 symbol",    length: "0.4 symbol", period: "1 symbol", priority: 3 }
+  - { name: DL_PDSCH_ISR,  core: 0, timing: dl_rtg, entry: dl_pdsch_isr,  start: "13.3 symbol", length: "2.5 symbol", period: "1 slot",   priority: 4 }
+  - { name: UL_SYMBOL_ISR, core: 1, timing: ul_rtg, entry: ul_symbol_isr, start: "0 symbol",    length: "0.4 symbol", period: "1 symbol", priority: 3 }
+  - { name: UL_PUCCH_ISR,  core: 1, timing: ul_rtg, entry: ul_pucch_isr,  start: "11 symbol",   length: "0.8 symbol", period: "1 slot",   priority: 2 }
+window: { start: "-1 symbol", end: "6 slot" }
+cost_model:
+  default_cost: "0.03 symbol"
+  external_cost: "0.01 symbol"
+  function_costs:
+    "dl::LdpcDecoder::run": "0.6 symbol"
+    "dl::FftDriver::kick": "0.05 symbol"
+    "*::run": "0.1 symbol"
+    "dl::*": "0.05 symbol"
+    "ul::*": "0.05 symbol"

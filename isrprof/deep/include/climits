@@ -1,0 +1,4 @@
+#ifndef _ISRPROF_climits
+#define _ISRPROF_climits
+#include <limits.h>
+#endif

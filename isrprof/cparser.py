@@ -28,6 +28,12 @@ KEYWORDS = {
     "int", "char", "short", "long", "float", "double", "signed", "unsigned", "_Bool",
     "__attribute__", "__asm__", "asm", "__asm", "_Static_assert", "_Alignas", "_Atomic",
     "restrict", "__restrict", "__extension__", "__typeof__", "typeof",
+    # C++
+    "class", "namespace", "template", "typename", "public", "private", "protected", "virtual", "override",
+    "final", "using", "new", "delete", "this", "nullptr", "true", "false", "throw", "try", "catch", "operator",
+    "explicit", "friend", "constexpr", "consteval", "constinit", "mutable", "static_cast", "dynamic_cast",
+    "reinterpret_cast", "const_cast", "decltype", "noexcept", "alignas", "alignof", "static_assert", "co_await",
+    "co_return", "co_yield", "export", "import", "module", "requires", "concept",
 }
 TYPE_KEYWORDS = {"void", "int", "char", "short", "long", "float", "double", "signed",
                  "unsigned", "_Bool", "struct", "union", "enum", "const", "volatile",
@@ -42,7 +48,7 @@ _TOKEN_RE = re.compile(
   | (?P<chr>'(?:\\.|[^'\\\n])*')
   | (?P<num>0[xX][0-9a-fA-F]+[uUlL]*|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?[uUlLfF]*)
   | (?P<id>[A-Za-z_]\w*)
-  | (?P<op><<=|>>=|\.\.\.|->|\+\+|--|&&|\|\||<=|>=|==|!=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|[-+*/%<>=!&|^~?:;,.(){}\[\]])
+  | (?P<op><<=|>>=|\.\.\.|->\*|->|::|\+\+|--|&&|\|\||<=|>=|==|!=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|[-+*/%<>=!&|^~?:;,.(){}\[\]])
     """,
     re.VERBOSE,
 )
@@ -83,6 +89,9 @@ class Call:
     line: int
     seq: int
     indirect: bool = False
+    member: bool = False      # `obj.method(...)`: resolved by method name across classes
+    candidates: list = field(default_factory=list)   # explicit targets (deep analysis: overrides, fn-pointer targets)
+    call_kind: str = ""
 
 
 @dataclass
@@ -112,6 +121,9 @@ class FunctionDef:
 
     @property
     def id(self) -> str:
+        ov = getattr(self, "id_override", None)
+        if ov:
+            return ov
         return f"{self.name}@{os.path.basename(self.file)}" if self.is_static else self.name
 
 
@@ -240,6 +252,8 @@ class CParser:
         self.ignore_calls = set(cfg.parser.get("ignore_calls", []))
         self.ignore_vars = set(cfg.memory.get("ignore_vars", []))
         self.result = ParseResult()
+        self.class_names: set[str] = set()
+        self.ptr_inits: dict[str, list[str]] = {}      # file-scope pointer / table variable -> functions in its initializer
         self._globals: dict[str, VarDef] = {}
         self._file_statics: dict[str, dict[str, VarDef]] = {}
         self._init_idents: dict[str, list[str]] = {}     # file -> identifiers seen inside file-scope initializers
@@ -272,7 +286,7 @@ class CParser:
         spec = self._hw_spec(name)
         if spec is None:
             return None
-        reg = _join(args[spec["reg_arg"]]) if spec.get("reg_arg") is not None and len(args) > spec["reg_arg"] else ""
+        reg = str(spec.get("reg")) if spec.get("reg") else (_join(args[spec["reg_arg"]]) if spec.get("reg_arg") is not None and len(args) > spec["reg_arg"] else "")
         if spec.get("block"):
             block = str(spec["block"])
         elif spec.get("block_arg") is not None and len(args) > spec["block_arg"] and args[spec["block_arg"]]:
@@ -359,6 +373,8 @@ class CParser:
             stmt = toks[stmt_start:i]
             terminator = toks[i].text if i < n else ";"
             if terminator == "{":
+                if stmt and stmt[0].text in ("class", "struct", "union") and len(stmt) >= 2 and stmt[1].kind == "id" and not any(t.text == "(" for t in stmt):
+                    self.class_names.add(stmt[1].text)
                 # function definition  or  struct/enum/union body or initializer
                 is_func = self._looks_like_function_header(stmt)
                 if is_func:
@@ -373,8 +389,11 @@ class CParser:
                     k += 1
                 full = stmt + toks[i:k]
                 if any(t.text == "=" for t in stmt):     # `type name[] = { ... }` -> remember referenced identifiers
-                    self._init_idents.setdefault(file, []).extend(
-                        t.text for t in toks[i + 1:j] if t.kind == "id" and t.text not in KEYWORDS)
+                    ids_ = [t.text for t in toks[i + 1:j] if t.kind == "id" and t.text not in KEYWORDS]
+                    self._init_idents.setdefault(file, []).extend(ids_)
+                    vn = self._declared_name(stmt)
+                    if vn:
+                        self.ptr_inits.setdefault(vn, []).extend(ids_)
                 self._maybe_var_decl(file, full, statics)
                 i = k + 1
                 continue
@@ -387,10 +406,24 @@ class CParser:
                 else:
                     eq = next((k for k, t in enumerate(stmt) if t.text == "="), None)
                     if eq is not None:                    # `fn_ptr_t handler = dl_stage_eq;`
-                        self._init_idents.setdefault(file, []).extend(
-                            t.text for t in stmt[eq + 1:] if t.kind == "id" and t.text not in KEYWORDS)
+                        ids_ = [t.text for t in stmt[eq + 1:] if t.kind == "id" and t.text not in KEYWORDS]
+                        self._init_idents.setdefault(file, []).extend(ids_)
+                        vn = self._declared_name(stmt[:eq])
+                        if vn and ids_:
+                            self.ptr_inits.setdefault(vn, []).extend(ids_)
                     self._maybe_var_decl(file, stmt, statics)
             i += 1
+
+    def _declared_name(self, stmt: list[Tok]) -> str | None:
+        """name declared by `static const p_t k_p = ...` / `void (*const tbl[2])(void)` (last identifier before `=`, `[` or the end)."""
+        ids = [t for t in stmt if t.kind == "id" and t.text not in KEYWORDS]
+        if not ids:
+            return None
+        for k, t in enumerate(stmt):
+            if t.text in ("=", "["):
+                prev = [x for x in stmt[:k] if x.kind == "id" and x.text not in KEYWORDS]
+                return prev[-1].text if prev else None
+        return ids[-1].text
 
     def _looks_like_prototype(self, stmt: list[Tok]) -> bool:
         if stmt[0].text in ("typedef",):
@@ -427,7 +460,7 @@ class CParser:
                 toks = toks[:k - 1]
                 continue
             return k > 0 and toks[k - 1].kind == "id" and toks[k - 1].text not in (
-                "struct", "union", "enum", "if", "while", "for", "switch")
+                "struct", "union", "enum", "if", "while", "for", "switch", "catch", "return", "sizeof", "decltype", "noexcept", "alignof", "static_assert")
         return False
 
     def _function_name_from_header(self, stmt: list[Tok]) -> str | None:
@@ -436,6 +469,18 @@ class CParser:
         if (len(body) >= 4 and body[0].kind == "id" and body[0].text.isupper() and body[1].text == "("
                 and body[-1].text == ")" and body[2].kind == "id" and all(t.text != "(" for t in body[2:-1])):
             return body[2].text
+        # constructor initializer list `Foo::Foo(int a) : m_a(a), m_b(0)` -> cut at the top-level ':' after the parameter list
+        depth, first_close = 0, None
+        for k, t in enumerate(stmt):
+            if t.text == "(":
+                depth += 1
+            elif t.text == ")":
+                depth -= 1
+                if depth == 0 and first_close is None:
+                    first_close = k
+            elif t.text == ":" and depth == 0 and first_close is not None:
+                stmt = stmt[:k]
+                break
         depth = 0
         for k in range(len(stmt) - 1, -1, -1):
             t = stmt[k].text
@@ -447,6 +492,15 @@ class CParser:
                     name = stmt[k - 1].text
                     if name == "__attribute__":
                         continue
+                    if name in ("catch", "else", "sizeof", "alignof", "decltype", "noexcept", "static_assert"):
+                        return None
+                    # qualified name:  ns::Class::method  (also destructors ~Foo and operator overloads stay unqualified)
+                    j = k - 1
+                    while j >= 2 and stmt[j - 1].text == "::" and stmt[j - 2].kind == "id":
+                        name = stmt[j - 2].text + "::" + name
+                        j -= 2
+                    if j >= 1 and stmt[j - 1].text == "~":
+                        name = "~" + name
                     return name
         return None
 
@@ -513,8 +567,22 @@ class CParser:
     # -- functions ----------------------------------------------------------------
     def _collect_functions(self, file: str, toks: list[Tok]):
         i, n = 0, len(toks)
+        cls_stack: list[tuple[str, int]] = []       # (class name, index of its closing brace)
         while i < n:
+            while cls_stack and i > cls_stack[-1][1]:
+                cls_stack.pop()
             if toks[i].text != "{":
+                i += 1
+                continue
+            # `class X ... {` / `struct X ... {` opens a class body: remember it for the methods defined inline
+            k0 = i - 1
+            while k0 >= 0 and toks[k0].text not in (";", "}", "{"):
+                k0 -= 1
+            hdr = toks[k0 + 1:i]
+            if hdr and hdr[0].text in ("class", "struct", "union") and len(hdr) >= 2 and hdr[1].kind == "id" and not any(t.text == "(" for t in hdr):
+                end = _match_close(toks, i, "{", "}")
+                cls_stack.append((hdr[1].text, end))
+                self.class_names.add(hdr[1].text)
                 i += 1
                 continue
             # find header: walk back to previous ';' or '}' at depth 0
@@ -526,6 +594,8 @@ class CParser:
                 name = self._function_name_from_header(header)
                 end = _match_close(toks, i, "{", "}")
                 if name:
+                    if cls_stack and "::" not in name:
+                        name = cls_stack[-1][0] + "::" + name.lstrip("~") if name.startswith("~") and False else cls_stack[-1][0] + "::" + name
                     fd = FunctionDef(
                         name=name, file=file, line=header[0].line if header else toks[i].line,
                         end_line=toks[end].line, is_static=any(t.text == "static" for t in header),
@@ -618,8 +688,33 @@ class CParser:
             t = body[i]
             nxt = body[i + 1].text if i + 1 < n else ""
             prev = body[i - 1].text if i > 0 else ""
+            if t.text in ("]", ")") and nxt == "(" and not (t.text == ")" and self._is_cast_or_keyword_paren(body, i)):
+                base = self._base_ident(body, i)
+                if base and base not in KEYWORDS:
+                    seq += 1
+                    fd.calls.append(Call(callee=base, line=t.line, seq=seq, indirect=True))
+                i += 1
+                continue
+            if t.text in ("new", "delete") and t.kind == "id":
+                seq += 1
+                fd.heap.append(Call(callee=t.text, line=t.line, seq=seq))
+                fd.calls.append(Call(callee=t.text, line=t.line, seq=seq))
+                i += 1
+                continue
+            if t.kind == "id" and t.text not in KEYWORDS and nxt == "<" and prev not in (".", "->"):
+                close = self._template_close(body, i + 1)
+                if close is not None and close + 1 < n and body[close + 1].text == "(":
+                    seq += 1
+                    fd.calls.append(Call(callee=t.text, line=t.line, seq=seq))
+                    i = close + 1
+                    continue
+            if t.kind == "id" and t.text in self.class_names and i + 2 < n and body[i + 1].kind == "id" and body[i + 1].text not in KEYWORDS and body[i + 2].text == "(":
+                seq += 1
+                fd.calls.append(Call(callee=t.text + "::" + t.text, line=t.line, seq=seq))
+                i += 2
+                continue
             if t.kind == "id" and t.text not in KEYWORDS:
-                if nxt == "(" and prev not in (".", "->"):
+                if nxt == "(" and prev not in (".", "->", "::") or (nxt == "(" and prev == "::"):
                     close = _match_close(body, i + 1, "(", ")")
                     args = _split_args(body[i + 2:close])
                     name = t.text
@@ -627,14 +722,20 @@ class CParser:
                     hw_acc = self._hw_from_call(name, args, t.line, seq)
                     if hw_acc is not None:
                         fd.hw.append(hw_acc)
+                        if (self._hw_spec(name) or {}).get("function"):      # access function: also a call edge
+                            fd.calls.append(Call(callee=name, line=t.line, seq=seq))
                     elif name in self.access_macros:
                         # accessor macro for a registered structure: ASA_GET(dl.harq) / SHM_WR(ASA, ul.tpc, v)
                         am = self.access_macros[name]
                         var = am.get("var") or (_join(args[am["var_arg"]]) if am.get("var_arg") is not None and len(args) > am["var_arg"] else "?")
                         field = _join(args[am["field_arg"]]).replace(" ", "") if am.get("field_arg") is not None and len(args) > am["field_arg"] else ""
+                        var = var.lstrip("& ")
+                        field = am.get("field") or field
                         vd = self._globals.get(var) or file_statics.get(var)
                         fd.vars.append(VarAccess(name=var, rw=am.get("rw", "r"), line=t.line, kind=vd.kind if vd else "global",
                                                  seq=seq, member=field, via_macro=name))
+                        if am.get("function"):
+                            fd.calls.append(Call(callee=name, line=t.line, seq=seq))
                     elif name in self.ipc_macros:
                         ch = _join(args[self.ipc_arg]) if len(args) > self.ipc_arg else "?"
                         fd.ipc.append(IpcOp(macro=name, channel=ch, line=t.line, seq=seq))
@@ -642,6 +743,8 @@ class CParser:
                     elif name in self.heap_funcs:
                         fd.heap.append(Call(callee=name, line=t.line, seq=seq))
                         fd.calls.append(Call(callee=name, line=t.line, seq=seq))
+                    elif name in self.ptr_inits and not (self._globals.get(name) is None and name in self.result.prototypes):
+                        fd.calls.append(Call(callee=name, line=t.line, seq=seq, indirect=True, candidates=list(self.ptr_inits[name])))
                     elif name not in self.ignore_calls:
                         fd.calls.append(Call(callee=name, line=t.line, seq=seq))
                     # scan args for nested calls / var accesses: do not skip them
@@ -649,7 +752,7 @@ class CParser:
                     continue
                 if nxt == "(" and prev in (".", "->"):
                     seq += 1
-                    fd.calls.append(Call(callee=prev + t.text, line=t.line, seq=seq, indirect=True))
+                    fd.calls.append(Call(callee=t.text, line=t.line, seq=seq, indirect=True, member=True))
                     i += 1
                     continue
                 # variable access?
@@ -676,6 +779,66 @@ class CParser:
                                              member=self._member_chain(body, i)))
             i += 1
         fd.n_seq = seq
+
+    def _template_close(self, body: list[Tok], i: int) -> int | None:
+        """body[i] is '<'; the matching '>' of a template argument list (only type-ish tokens inside), else None."""
+        depth, k, n = 0, i, len(body)
+        while k < n:
+            tt = body[k].text
+            if tt == "<":
+                depth += 1
+            elif tt == ">":
+                depth -= 1
+                if depth == 0:
+                    return k
+            elif tt == ">>":
+                depth -= 2
+                if depth <= 0:
+                    return k
+            elif body[k].kind == "op" and tt not in (",", "::", "*", "&", "(", ")", "[", "]"):
+                return None
+            elif body[k].kind == "id" and tt in ("if", "while", "for", "return"):
+                return None
+            k += 1
+            if k - i > 40:
+                return None
+        return None
+
+    def _base_ident(self, body: list[Tok], i: int) -> str | None:
+        """`tbl [ 0 ]` / `get ( ) ` ending at i -> the identifier the bracket chain hangs on (None for `if (...)`)."""
+        k = i
+        while k >= 0 and body[k].text in (")", "]"):
+            open_t = "(" if body[k].text == ")" else "["
+            depth = 0
+            while k >= 0:
+                if body[k].text in (")", "]") and body[k].text == (")" if open_t == "(" else "]"):
+                    depth += 1
+                elif body[k].text == open_t:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k -= 1
+            k -= 1
+        if k >= 0 and body[k].kind == "id" and body[k].text not in KEYWORDS:
+            return body[k].text
+        return None
+
+    def _is_cast_or_keyword_paren(self, body: list[Tok], i: int) -> bool:
+        """the `)` at i closes `if (...)`, `while (...)`, a cast `(T *)` or a parenthesised expression (not a call target)."""
+        base = self._base_ident(body, i)
+        if base is None:
+            return True
+        k = i
+        depth = 0
+        while k >= 0:
+            if body[k].text == ")":
+                depth += 1
+            elif body[k].text == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+            k -= 1
+        return k > 0 and body[k - 1].text in ("if", "while", "for", "switch", "return", "sizeof", "catch")
 
     def _member_chain(self, body: list[Tok], i: int) -> str:
         """'ASA . dl . harq [ 2 ] . ack' -> 'dl.harq.ack' (array indices dropped); '' when no member follows."""

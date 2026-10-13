@@ -1,0 +1,8 @@
+#ifndef _ISRPROF_STDBOOL_H
+#define _ISRPROF_STDBOOL_H
+#ifndef __cplusplus
+#define bool _Bool
+#define true 1
+#define false 0
+#endif
+#endif

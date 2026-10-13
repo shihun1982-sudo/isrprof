@@ -11,6 +11,7 @@ from . import build as buildmod
 from .callgraph import CallGraph
 from .config import Config, StructNode
 from .cparser import parse
+from . import deep as deepmod
 from .llm import LLMAssist
 from .structure import StructureAnalyzer
 
@@ -84,6 +85,10 @@ def _rel(cfg: Config, path: str) -> str:
 def run(cfg: Config) -> dict:
     t0 = time.perf_counter()
     pr = parse(cfg)
+    deep_stats = None
+    graph_deep = deepmod.run(cfg)
+    if graph_deep is not None:
+        deep_stats = deepmod.apply(cfg, pr, graph_deep)
     t_parse = time.perf_counter()
     llm = LLMAssist(cfg)
     fmap = _FileMap(cfg)
@@ -179,11 +184,10 @@ def run(cfg: Config) -> dict:
             "core": fid_to_core.get(f.id), "module": fid_module[f.id],
             "self_us": round(costs.get(f.id, cfg.cost_model["default_cost_us"]), 3),
             "cost_source": cost_src.get(f.id, "default"),
-            "calls": [{"callee": c.callee, "line": c.line, "indirect": c.indirect,
+            "calls": [{"callee": c.callee, "line": c.line, "indirect": c.indirect, "kind": getattr(c, "call_kind", "") or ("member" if getattr(c, "member", False) else ("indirect" if c.indirect else "direct")),
                        "callee_id": None if c.indirect else res_id(c.callee, f.file),
-                       # indirect (function-pointer / dispatch-table) call: every candidate from the file's tables
-                       "callee_ids": ([t for t in (res_id(nm, f.file) for nm in pr.table_refs.get(f.file, []))
-                                       if t is not None and t != f.id] if c.indirect else [])}
+                       # indirect (member / virtual / function-pointer) call: the resolved candidates
+                       "callee_ids": ([t.id for t in cg._indirect_targets(c, f) if t.id != f.id] if c.indirect else [])}
                       for c in f.calls],
             "hw": [{"macro": h.macro, "kind": h.kind, "block": h.block, "reg": h.reg, "line": h.line, "seq": h.seq} for h in f.hw],
             "vars": [{"name": v.name, "rw": v.rw, "line": v.line, "kind": v.kind, "seq": v.seq, "member": v.member, "via_macro": v.via_macro} for v in f.vars],
@@ -191,6 +195,8 @@ def run(cfg: Config) -> dict:
             "ipc": [{"macro": i.macro, "channel": i.channel, "line": i.line, "seq": i.seq} for i in f.ipc],
             "n_seq": max(1, f.n_seq),
             "static_locals": f.static_locals,
+            "precise": bool(getattr(f, "deep", False)), "kind": getattr(f, "kind", "function"), "cls": getattr(f, "cls", ""),
+            "virtual": bool(getattr(f, "virtual", False)), "overrides": list(getattr(f, "overrides", []) or []),
             "summary": summaries.get(f.id, ""),
             "note": cfg.annotations["functions"].get(f.id, cfg.annotations["functions"].get(f.name, "")),
         }
@@ -405,6 +411,7 @@ def run(cfg: Config) -> dict:
         "project": {"name": cfg.name, "profile": cfg.meta.name if cfg.meta else cfg.name,
                     "sources": [_rel(cfg, s) for s in cfg.sources]},
         "build": buildmod.summary(cfg.build),
+        "deep": deep_stats,
         "numerology": num.to_dict(),
         "window": {"start_us": round(start, 3), "end_us": round(end, 3)},
         "cores": [{k: v for k, v in c.items() if k != "modules"} | {"modules": [m["name"] for m in c["modules"]]} for c in cfg.cores],

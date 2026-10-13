@@ -74,7 +74,7 @@ function treeItem(n, path, isr, isRoot, k, extra, rel) {
   const dim = S.block ? !hl(n.fid) : !inFocus(path, n.fid);
   const row = `<div class="row ${isRoot ? 'isr' : ''} ${S.selPath === path ? 'sel' : ''} ${dim ? 'dim' : ''}" data-path="${esc(path)}" data-fid="${esc(n.fid)}">` +
     `<span class="car">${kids.length ? (open ? '▾' : '▸') : '·'}</span><i class="sw" style="background:${f ? modColor(f.module) : 'var(--muted)'}"></i>` +
-    `<span class="nm">${isRoot ? '⚡ ' + esc(isr.name) + ' → ' : ''}${esc(n.name)}</span>${badges.join('')}<span class="t">${fmt(n.total_us)}</span></div>`;
+    `<span class="nm">${isRoot ? esc(isr.name) + ' → ' : ''}${esc(n.name)}</span>${badges.join('')}<span class="t">${fmt(n.total_us)}</span></div>`;
   return `<li>${row}${extra || ''}${open && kids.length ? `<ul>${kids.map((c, i) => treeItem(c, path + '/' + i, isr, false, k, '', rel + 1)).join('')}</ul>` : ''}</li>`;
 }
 function staticItem(fid, path, depth, seen) {     // call tree from the static call graph (functions not reached by a visible ISR)
@@ -205,7 +205,7 @@ function renderDetail() {
     const shownPath = S.selPath || findPath(S.selFid);
     const n = shownPath ? nodeAt(shownPath) : null, f = fnOf(S.selFid), sf = ST.functions[S.selFid];
     const isr = shownPath ? isrOfPath(shownPath) : null, k = shownPath ? instOfPath(shownPath) : 0, dt = isr ? k * (isr.period_us || 0) : 0;
-    h = `<div class="mono" style="font-weight:600;font-size:13px">${esc(short(S.selFid))}${f && f.static ? ' <span class="b">static</span>' : ''}</div><dl class="kv">`;
+    h = `<div class="mono" style="font-weight:600;font-size:13px">${esc(short(S.selFid))}${f && f.static ? ' <span class="b">static</span>' : ''}${f && f.kind && f.kind !== 'function' ? ' <span class="b">' + esc(f.kind) + (f.virtual ? ' · virtual' : '') + '</span>' : ''}${f && f.precise ? ' <span class="b ok" title="calls and references from the build-based (compiler) analysis">build-based</span>' : ''}${f && f.overrides && f.overrides.length ? ' <span class="b">overrides ' + f.overrides.map(short).map(esc).join(', ') + '</span>' : ''}</div><dl class="kv">`;
     if (f) h += `<dt>where</dt><dd>${esc(f.file)}:${f.line}–${f.end_line} · ${esc(SWN[FNODE[f.id]] ? SWN[FNODE[f.id]].name : f.module)} · core ${f.core == null ? '?' : f.core}</dd><dt>signature</dt><dd>${esc(f.signature)}</dd>`;
     if (f && f.summary) h += `<dt>summary</dt><dd>${esc(f.summary)} <span class="b">llm</span></dd>`;
     if (f && f.note) h += `<dt>note</dt><dd>${esc(f.note)}</dd>`;
@@ -222,9 +222,11 @@ function renderDetail() {
         f.heap.map(x => `<tr><td>${esc(x.fn)}</td><td>heap</td><td>alloc</td></tr>`).join('') + '</table>';
     }
     if (f && f.calls.length) h += `<div style="margin-top:6px;font-size:11.5px;color:var(--muted)">calls: ${f.calls.map(c => `<code>${esc(c.callee)}</code>`).join(', ')}</div>`;
+    if (f) h += section('sec-impact', 'Impact', (f.precise ? 'build-based' : 'token parser'), impactHtml(S.selFid), true);
     if (REL) h += relatedHtml();
   }
   el.innerHTML = h;
+  wireImpact(el);
   el.querySelectorAll('.fnb').forEach(b => b.addEventListener('click', () => selectNode(findPath(b.dataset.fid), b.dataset.fid)));
   el.querySelectorAll('.blkl').forEach(b => b.addEventListener('click', () => selectBlock(b.dataset.block)));
   el.querySelectorAll('.ndl').forEach(b => b.addEventListener('click', () => selectSwNode(b.dataset.node)));

@@ -1,0 +1,4 @@
+#ifndef _ISRPROF_cstring
+#define _ISRPROF_cstring
+#include <string.h>
+#endif

@@ -37,6 +37,10 @@ def _summary(p: dict) -> str:
         lines.append(f"    core{isr['core']} {isr['name']:<16} ref={isr['timing']:<9} start={isr['start_us'] / sym:5.2f} sym "
                      f"computed={isr['computed_us'] / sym:5.2f} sym budget={budget:>5} sym  "
                      f"hw={len(isr['hw_events'])} deadline-miss={viol}{flag}")
+    if p.get("deep"):
+        d = p["deep"]
+        lines += ["", f"  Deep analysis ({d['backend']}): {d['files']} translation units, {d['functions']} functions ({d['replaced']} refined, {d['added']} new, {d['virtual_methods']} virtual) in {d.get('ms', d.get('total_ms', 0))} ms, cache hits {d.get('cache_hits', 0)}"]
+        lines += [f"    note: {l}" for l in d.get("log", [])[:5]]
     m = p["structure"]["metrics"]
     lines += ["", "  Structure (Structure101-style):",
               f"    functions={m['functions']} deps={m['dependencies']} feedback={m['feedback_dependencies']} "
@@ -55,6 +59,15 @@ def _summary(p: dict) -> str:
 def cmd_run(args) -> int:
     t0 = time.perf_counter()
     cfg = cfgmod.load(args.target, args.profiles_dir)
+    d = cfg.build.setdefault("deep", {})
+    if args.deep:
+        d["enabled"] = True
+    if args.no_deep:
+        d["enabled"] = False
+    if args.deep_backend:
+        d["backend"] = args.deep_backend
+    if args.deep_scope:
+        d["scope"] = [s.strip() for s in args.deep_scope.split(",") if s.strip()]
     profile = run(cfg)
     out_dir = args.out_dir or cfg.output["dir"]
     html = args.out or (os.path.join(out_dir, os.path.basename(cfg.output["html"])) if args.out_dir else cfg.output["html"])
@@ -102,6 +115,10 @@ def main(argv=None) -> int:
     r.add_argument("--no-json", action="store_true")
     r.add_argument("--fragment", help="also write a body-only HTML fragment (for embedding)")
     r.add_argument("--quiet", "-q", action="store_true")
+    r.add_argument("--deep", action="store_true", help="enable the build-based deep analysis (build.deep.enabled: true)")
+    r.add_argument("--no-deep", action="store_true", help="disable it even if the profile enables it")
+    r.add_argument("--deep-backend", choices=["clang", "objects", "both"], help="override build.deep.backend")
+    r.add_argument("--deep-scope", help="comma-separated globs / SW node ids analysed deeply (override build.deep.scope)")
     r.set_defaults(func=cmd_run)
     l = sub.add_parser("list", help="list stored profiles")
     l.set_defaults(func=cmd_list)

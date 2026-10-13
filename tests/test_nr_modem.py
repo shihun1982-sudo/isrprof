@@ -31,7 +31,7 @@ class NrModemTests(unittest.TestCase):
         stages = [c["name"] for c in run["children"]]
         self.assertEqual(stages, ["stage_eq", "stage_demap", "stage_descramble", "stage_rate_dematch",
                                   "stage_ldpc_decode", "stage_crc", "stage_deliver"])
-        self.assertTrue(all(c["via_table"] == ".run" for c in run["children"]))
+        self.assertTrue(all(c["via_table"] == "run" for c in run["children"]))
         # the static closure handed to the viewer carries the same candidates
         call = next(c for c in self.p["functions"]["dl_pdsch_run"]["calls"] if c["indirect"])
         self.assertEqual(len(call["callee_ids"]), 7)

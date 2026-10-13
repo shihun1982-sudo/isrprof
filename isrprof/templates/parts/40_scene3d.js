@@ -410,7 +410,7 @@ function build3D() {
       gW.length = 0;
       root.add(segs([px0, row.yBot, dz + ZBACK, px1, row.yBot, dz + ZBACK], gridC, { opacity: 0.45 }));
       const twoLines = row.h >= fh(FS.isr + FS.sub) * 1.45 && !manyRows;
-      const t1 = label(`⚡ ${isr.name}`, { bold: true, h: fh(FS.isr), color: (S.selPath && isrOfPath(S.selPath) === isr) ? cssVar('--accent') : cssVar('--fg') });
+      const t1 = label(isr.name, { bold: true, h: fh(FS.isr), color: (S.selPath && isrOfPath(S.selPath) === isr) ? cssVar('--accent') : cssVar('--fg') });
       t1.position.set(px0 - 0.1 - t1.scale.x / 2, twoLines ? row.y + fh(FS.sub) * 0.65 : row.y, dz + 0.3); t1.userData = { isrRow: isr, title: `${isr.name}: ${ref.name} +${(isr.start_us / SYM).toFixed(2)} sym · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym budget' : 'no budget'}${isr.period_us ? ' · every ' + fmt(isr.period_us) : ''} · click to focus the ISR` }; root.add(t1); pick3.push(t1);
       if (twoLines) {
         const t2 = label(`${ref.name} +${(isr.start_us / SYM).toFixed(2)} · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym' : 'no budget'}${isr.period_us ? ' · /' + fmt(isr.period_us).replace(' ', '') : ''}`, { h: fh(FS.sub), color: mutedC });
@@ -423,7 +423,7 @@ function build3D() {
         const dt = inst.k * (isr.period_us || 0), base = inst.start, sub = showSub(isr, inst.k) && (!lod || inst.k === shown.k), pfx = isr.name + '#' + inst.k;
         if (isr.length_us && base + isr.length_us >= r0 && base <= r1) {
           const ea = Math.max(base, r0), eb = Math.min(base + isr.length_us, r1), w = Math.max(tx(eb) - tx(ea), 0.02);
-          envRecs.push({ x: tx(ea) + dx, w, y: row.y, h: row.h - 0.06, z: dz - 0.15, c: isr.over_budget ? critC : coreC });
+          envRecs.push({ x: tx(ea) + dx, w, y: row.y, h: row.h - 0.04, z: dz - 0.15, c: isr.over_budget ? critC : coreC });
         }
         if (sub && S.showDeadlines) instDeadlines(isr, base).forEach(dl => { if (dl.t < r0 || dl.t > r1) return; const x = tx(dl.t) + dx; dlPts.push(x, row.yBot + 0.02, dz + 0.25, x, row.yTop - 0.02, dz + 0.25); if (inst.k === shown.k && !manyRows && (!REL || REL.blocks.has(dl.block))) { labelCands.push({ pri: 1e9, txt: `${dl.block} ≤${(dl.d.at_us / SYM).toFixed(1)}`, x: x + 0.02, y: row.yTop - 0.09, z: dz + 0.3, color: cssVar('--critical'), h: fh(FS.dl), left: true }); } });
         const list = sub ? vis : [vis[0]];
@@ -435,7 +435,7 @@ function build3D() {
           const col = new THREE.Color(f ? modColor(f.module) : mutedC);
           recs.push({ n, isr, path, k: inst.k, x: bx, w, y: yc, z: dz + n.depth * dzStep, col, foc, root: rr.parent < 0, ext: n.external, rec: n.recursive, via: !!n.via_table, sel: S.selPath === path });
           boxBudget--;
-          if (w > labelMinW || S.selPath === path) labelCands.push({ pri: w, txt: (rr.parent < 0 ? '⚡' : '') + n.name + (rr.parent < 0 && insts.length > 1 ? ` #${inst.k}` : '') + (rr.kids && !isOpen(rr.key, n.depth) ? ' ▸' : ''), x: bx + 0.02, y: yc, z: dz + n.depth * dzStep + 0.33, h: fh(FS.box), bold: rr.parent < 0, maxW: w - 0.02, dim: !foc, force: S.selPath === path });
+          if (w > labelMinW || S.selPath === path) labelCands.push({ pri: w, txt: n.name + (rr.parent < 0 && insts.length > 1 ? ` #${inst.k}` : '') + (rr.kids && !isOpen(rr.key, n.depth) ? ' ▸' : ''), x: bx + 0.02, y: yc, z: dz + n.depth * dzStep + 0.33, h: fh(FS.box), bold: rr.parent < 0, maxW: w - 0.02, dim: !foc, force: S.selPath === path });
           if (!sub) continue;
           const zm = dz + n.depth * dzStep + 0.2;
           nodeEvents(n, isr, inst.k).forEach(e => { if (e.t_us < r0 || e.t_us > r1) return; evRecs.push({ e, n, isr, path, x: tx(e.t_us) + dx, y: yc + BOX_H / 2 + 0.06, z: zm, c: e.violation ? critC : (e.kind === 'read' ? readC : writeC), foc, big: e.violation }); });
@@ -455,7 +455,7 @@ function build3D() {
   // --- instanced marks
   const mat = new THREE.Matrix4(), col = new THREE.Color();
   if (envRecs.length) {
-    const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), envRecs.length, { opacity: 0.14 });
+    const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), envRecs.length, { opacity: 0.09 });
     envRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; root.add(m); G.env = m;
   }

@@ -1,0 +1,17 @@
+[
+ {
+  "directory": ".",
+  "file": "common/shared.cpp",
+  "command": "c++ -DCONFIG_NR_MU=1 -I. -std=c++17 -O2 -c common/shared.cpp -o build/shared.cpp.o"
+ },
+ {
+  "directory": ".",
+  "file": "dl/decoder.cpp",
+  "command": "c++ -DCONFIG_NR_MU=1 -I. -std=c++17 -O2 -c dl/decoder.cpp -o build/decoder.cpp.o"
+ },
+ {
+  "directory": ".",
+  "file": "ul/uplink.cpp",
+  "command": "c++ -DCONFIG_NR_MU=1 -I. -std=c++17 -O2 -c ul/uplink.cpp -o build/uplink.cpp.o"
+ }
+]

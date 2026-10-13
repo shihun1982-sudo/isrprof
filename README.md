@@ -43,7 +43,7 @@ individually); *SW depth* / *HW depth* set how deep the structure diagrams nest.
 | | |
 |---|---|
 | ![3D view](docs/img/nr_3d_focus.png) 3D view framing the focused PDSCH pipeline | ![Structure tab](docs/img/nr_structure.png) Structure tab: DSM, LSM, violations |
-| ![40-copy tree](docs/img/scale_overview.png) synthetic 40-copy tree (1006 files, 4206 functions, 520 ISRs) | |
+| ![40-copy tree](docs/img/scale_overview.png) synthetic 40-copy tree (1006 files, 4206 functions, 520 ISRs) | ![C++ sample, deep analysis](docs/img/cxx_deep.png) C++ sample (`profiles/cxx_modem`): virtual stages resolved by the build-based analysis, Impact section |
 
 Porting to a new tree / machine: see **[docs/PORTING.md](docs/PORTING.md)** (inputs, outputs, step-by-step).
 
@@ -118,6 +118,46 @@ Time expressions: `"1.2 symbol"`, `"0.5 slot"`, `"-30 us"`, `"2 ms"`, `"1 subfra
 `#selonly-<function>`, `#level-4--swdepth-2`, `#isr-DL_PDSCH_ISR,DL_SYMBOL_ISR`, `#slots-2~3`, `#overlap-70`,
 `#structure`, `#selftest`.
 
+## Build-based deep analysis (C and C++)
+
+`build.deep.enabled: true` (or `run <profile> --deep`) analyses the code the way the compiler sees it instead
+of the token parser alone — toggle it per profile or per run, and limit it to the modules you are working on:
+
+| key | meaning |
+|---|---|
+| `deep.backend` | `clang` — libclang (`pip install libclang`, DLL included) parses every translation unit with its real `-D` / `-I` / `-std` flags from `compile_commands.json` and a cross target (`--target=arm-none-eabi`); nothing is compiled to a binary, so an ARM tree is analysed on a Windows PC. `objects` — the real build: optionally runs `cmake.configure` / `build_command`, then reads the `.o` files with the toolchain's `nm` / `objdump` (relocations = calls and data references). `both` merges them. |
+| `deep.scope` / `exclude` | globs relative to `build.root` or SW node ids: only those translation units are analysed deeply (speed on big trees), everything else stays on the token parser |
+| `deep.target`, `std_c`, `std_cxx`, `sysroot`, `extra_args` | cross flags; without a sysroot the bundled freestanding headers (`stdint.h`, `<new>` …) keep the parse going |
+| `deep.jobs`, `deep.cache` | parallel translation units; per-TU cache under `output/<name>/.cache/deep` (mtime + flags) so re-runs only re-analyse what changed |
+| `deep.build.run`, `objects`, `toolchain_prefix`, `nm`, `objdump` | objects backend: build first, which object files, which tools |
+
+What the clang backend adds over the token parser: C++ methods with qualified names, constructors / destructors,
+templates and lambdas, **virtual calls with their override set as candidates**, calls through function pointers
+resolved to the functions stored in the pointer / table / struct field, member accesses of global objects
+(`g_cfg.dl.gain = 1` → write `g_cfg.dl.gain`), class-static members, `new` / `delete`, and the exact read / write
+direction of every reference. Functions refined by the build are marked *build-based* in Details. The token parser
+itself also covers C++ (classes, `Class::method`, inline methods inside class bodies, constructor initializer lists,
+templates `f<T>(x)`, `obj.method()` resolved by method name, calls through tables and pointer variables) — see
+`tests/test_cxx_corpus.py`, which runs a hand-written construct corpus plus randomly generated programs with a known
+call graph through both parsers.
+
+**Registered access macros and functions.** Shared SW blocks and HW blocks are usually touched through dedicated
+macros or wrapper functions. Register them and every call site becomes a relation: `hw_structure.yaml:
+macros.read / write / rmw / custom` and `macros.functions` (`{name: hal_fft_start, kind: write, block: FFT, reg:
+START}`, or `block_arg` / `reg_arg` positions) mark HW accesses; `sw_structure.yaml: touch.access_macros` and
+`touch.access_functions` (`{name: shm_write, rw: w, var_arg: 0, field_arg: 1}` or a fixed `var`) mark shared-memory
+accesses. An access *function* keeps its call edge and additionally records the access, so the wrapper and the block
+both appear in the SW / HW structures, the Details relations and the impact analysis. The deep backend applies the
+same rules on the preprocessing record (macros) and on the resolved calls (functions), so overloaded / namespaced
+wrappers (`hal::Reg<FFT>::write`) are matched exactly.
+
+**Impact (Details › Impact).** For the selected function: *Used by* (direct callers, every ISR that reaches it,
+producers / consumers of its variables with their time in the slot), *Remove* (callers that break, functions that
+become unreachable from every ISR, variables that lose their only writer / reader, registers no longer accessed, ISR
+time after removal vs budget) and *Move to ISR* (pick target ISR and position: register accesses re-timed and
+re-checked against their deadlines, variable update order before / after with ⚠ where a writer / reader pair flips,
+cross-core changes, target ISR budget).
+
 ## Performance
 
 The parser is a pre-processor-free token parser (vendor trees work without an include path); file → module
@@ -132,7 +172,7 @@ interaction in the self-test stays well under a second in a software-rendered he
 ## Verification
 
 ```bash
-python -m unittest discover -s tests -v          # pipeline, profiles, build info, structures, parser, scale
+python -m unittest discover -s tests -v          # pipeline, profiles, build info, structures, parser, scale, C/C++ corpus + random programs
 python tools/check_js.py                         # viewer JS syntax (pip install esprima)
 python tools/verify_viewer.py output/nr_modem/profile.html      # drives the page in headless Edge / Chrome
 python tools/screenshot.py output/nr_modem/profile.html shot.png --hash sel-DL_PDSCH_ISR

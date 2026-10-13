@@ -1,0 +1,13 @@
+#ifndef _ISRPROF_INITIALIZER_LIST
+#define _ISRPROF_INITIALIZER_LIST
+#include <stddef.h>
+namespace std {
+template <class E> class initializer_list {
+  const E *_b; size_t _n;
+  constexpr initializer_list(const E *b, size_t n) : _b(b), _n(n) {}
+public:
+  constexpr initializer_list() : _b(0), _n(0) {}
+  constexpr size_t size() const { return _n; } constexpr const E *begin() const { return _b; } constexpr const E *end() const { return _b + _n; }
+};
+}
+#endif

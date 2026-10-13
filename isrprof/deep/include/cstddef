@@ -1,0 +1,4 @@
+#ifndef _ISRPROF_cstddef
+#define _ISRPROF_cstddef
+#include <stddef.h>
+#endif
