@@ -52,13 +52,13 @@
     <div class="stack-wrap">
       <div class="stack">
         <details class="panel" id="sw-panel" open>
-          <summary>SW structure <span class="hint">subsystems › modules › classes / structures / shared memory (sw_structure.yaml) — nested to the chosen depth · drag pans · wheel zooms · click a box to expand / collapse, a function to focus · a focused SW block lights up every box it executes in (■) / reads (r) / writes (w)</span>
+          <summary>SW structure <span class="hint">subsystems › modules › classes / structures / shared memory (sw_structure.yaml) — nested to the chosen depth, boxes packed to fill the window · drag pans · wheel zooms · double-click fits · click a box to expand / collapse, a function to focus · a focused SW block lights up every box it executes in (■) / reads (r) / writes (w)</span>
             <span class="pz"><button class="tog" data-pz="fit" data-host="sw">fit</button><button class="tog" data-pz="in" data-host="sw">＋</button><button class="tog" data-pz="out" data-host="sw">－</button></span></summary>
           <div class="body diagram" id="sw"></div>
         </details>
 
         <details class="panel" id="scene-panel" open>
-          <summary>3D timing diagram <span class="hint">x = cores (diagonal) · y = time on the NW slot / symbol grid with the channel allocation · z = ISRs of a slot with their SW blocks (rows = call depth) · dashed verticals = reference lines (DL RTG, UL RTG, HW REF …) · ● on a box = register access · ◆ under a box = shared-memory / IPC / heap touch · drag pans, wheel zooms time, shift+wheel scrolls</span></summary>
+          <summary>Timing diagram <span class="hint">one plane per core on a shared NW slot / symbol time axis (Aligned) or stacked on the diagonal (Stacked) or in perspective (3D) · rows = ISRs with their SW blocks (rows inside = call depth) · ▮ at the left = computed time vs budget · dashed verticals = reference lines (DL RTG, UL RTG, HW REF …) · ● on a box = register access · ◆ under a box = shared-memory / IPC / heap touch · click a box to show it in Details · drag pans, wheel zooms time, shift+wheel scrolls</span></summary>
           <div class="body scene-body">
             <div id="scene">
               <div class="axes"></div>
@@ -78,7 +78,7 @@
         </details>
 
         <details class="panel" id="hw-panel" open>
-          <summary>HW structure <span class="hint">chains › blocks › registers (hw_structure.yaml) — arrows = data flow · a focused SW block lights up every block it reads (R) / writes (W) and marks deadline misses · click a block to highlight its accessors everywhere</span>
+          <summary>HW structure <span class="hint">chains › blocks › registers (hw_structure.yaml) — boxes packed to fill the window · arrows = data flow · a focused SW block lights up every block it reads (R) / writes (W) and marks deadline misses · click a block to highlight its accessors everywhere, shift+click a block to list its registers</span>
             <span class="pz"><button class="tog" data-pz="fit" data-host="hw">fit</button><button class="tog" data-pz="in" data-host="hw">＋</button><button class="tog" data-pz="out" data-host="hw">－</button></span></summary>
           <div class="body diagram" id="hw"></div>
         </details>
@@ -91,7 +91,7 @@
         </details>
         <div id="hsplit" title="drag up / down to share the height between the call graph and the details · double-click resets"><i></i></div>
         <details class="panel" id="detail-panel" open>
-          <summary>Details <span class="hint">function-level SW / HW relations of the selection</span><span class="pz"><button class="tog mini" id="hist-back" title="back to the previous selection (Alt+←)">◀ back</button><button class="tog mini" id="hist-fwd" title="forward (Alt+→)">▶</button></span></summary>
+          <summary>Details <span class="hint">of the selection (timing-diagram box, call-graph row, SW function, variable or HW block): function-level SW / HW relations, scrolls</span><span class="pz"><button class="tog mini" id="hist-back" title="back to the previous selection (Alt+←)">◀ back</button><button class="tog mini" id="hist-fwd" title="forward (Alt+→)">▶</button></span></summary>
           <div class="body" id="detail"><div id="detail-body"></div></div>
         </details>
       </aside>

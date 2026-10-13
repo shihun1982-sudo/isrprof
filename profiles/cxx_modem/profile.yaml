@@ -12,9 +12,9 @@ inputs:
 output:
   dir: ../../output/cxx_modem
 viewer:
-  default_view: tilt
+  default_view: aligned
   expand_depth: 2
-  sw_structure: { depth: 3, columns: 3 }
-  hw_structure: { depth: 2, columns: 3 }
+  sw_structure: { depth: 3 }
+  hw_structure: { depth: 2 }
 llm:
   enabled: false

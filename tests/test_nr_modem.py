@@ -75,7 +75,7 @@ class NrModemTests(unittest.TestCase):
 
     def test_viewer_section_and_annotations(self):
         v = self.p["viewer"]
-        self.assertEqual(v["default_view"], "tilt")
+        self.assertEqual(v["default_view"], "aligned")
         self.assertEqual(v["row_px"], 12)                      # default kept
         self.assertEqual(v["sw_structure"]["open"], ["dl_pdsch"])   # deep-merged user value
         self.assertEqual(len(v["colors"]["palette_light"]), 8)

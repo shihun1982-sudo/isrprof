@@ -30,7 +30,7 @@ output:
 
 # ---------------------------------------------------------------- viewer appearance (all optional)
 viewer:
-  default_view: tilt             # tilt (core planes stacked on the diagonal) | aligned (front) | 3d (perspective)
+  default_view: aligned          # aligned (every core on one time axis) | tilt (core planes stacked on the diagonal) | 3d (perspective)
   tilt_dx_px: 36                 # horizontal shift per core plane in the tilt view
   theme: auto                    # auto | light | dark
   unit: sym                      # sym | us
@@ -46,8 +46,8 @@ viewer:
     write: "#eb6834"
     miss: "#d03b3b"
   channels: { show: true, row_px: 12 }
-  sw_structure: { depth: 3, columns: 4, open: [dl_pdsch] }   # depth shown at load (slider in the UI), nodes expanded
-  hw_structure: { depth: 2, columns: 4 }
+  sw_structure: { depth: 3, open: [dl_pdsch] }   # depth shown at load (slider in the UI), nodes expanded; the grid columns follow the window width
+  hw_structure: { depth: 2 }
   dsm_max_functions: 400         # above this the DSM starts with every module collapsed (keeps the page fast)
 
 # ---------------------------------------------------------------- optional LLM assistance (disabled)

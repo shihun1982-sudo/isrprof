@@ -448,7 +448,7 @@ def build_config(raw: dict, meta: ProfileMeta) -> Config:
 
 # ---------------------------------------------------------------- viewer appearance (all overridable)
 VIEWER_DEFAULTS: dict = {
-    "default_view": "tilt",         # tilt (cores stacked on the diagonal) | aligned (front) | 3d (perspective)
+    "default_view": "aligned",      # aligned (every core on one time axis) | tilt (cores stacked on the diagonal) | 3d (perspective)
     "tilt_dx_px": 36,               # tilt view: horizontal shift per core plane (pixels)
     "theme": "auto",                # auto | light | dark
     "unit": "sym",                  # sym | us  (time unit in labels)
@@ -465,8 +465,12 @@ VIEWER_DEFAULTS: dict = {
         "read": None, "write": None, "miss": None, "heap": None, "accent": None,
     },
     "channels": {"show": True, "row_px": 12},
-    "sw_structure": {"depth": 3, "columns": 4, "open": []},
-    "hw_structure": {"depth": 2, "columns": 3, "open": []},
+    "sw_structure": {"depth": 3, "columns": 12, "leaf_px": 196, "open": []},   # columns = cap on the page grid (auto from the width), leaf_px = column width
+    "hw_structure": {"depth": 2, "columns": 12, "leaf_px": 176, "open": []},
+    "diagram": {"max_vh": 0.38, "min_scale": 0.7, "scene_max_vh": 0.6},   # windows grow with their content up to this share of the screen (structure diagrams then shrink down to min_scale)
+    "stack_overlap": 0.0,           # stacked view: how much a core plane covers the one behind it (0 = every row visible)
+    "slot_bands": True,             # tint U / S slots (TDD pattern) or every other slot (FDD) in the timing diagram
+    "default_slots": 5,             # slots shown at load when the window is longer
     "window_range": None,           # initial time range in slots, e.g. [0, 1.5]
     "dsm_max_functions": 400,       # above this the DSM starts with every module collapsed
 }

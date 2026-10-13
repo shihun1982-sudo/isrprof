@@ -69,7 +69,7 @@ const S = {
   unit: V.unit === 'us' ? 'us' : 'sym', cores: new Set(CORES.map(c => c.id)), isrs: null,   // isrs: null = all, else Set of ISR names
   pinPath: null,             // call-graph panel: function kept as the root of the tree (null = the ISR entry)
   refHidden: new Set(), showDeadlines: true,   // reference lines switched off in the controls; HW deadline ticks on / off
-  overlap: Math.max(0, Math.min(0.85, +(V.stack_overlap == null ? 0.5 : V.stack_overlap))),   // stacked view: how much a core plane covers the one behind
+  overlap: Math.max(0, Math.min(0.85, +(V.stack_overlap == null ? 0 : V.stack_overlap))),   // stacked view: how much a core plane covers the one behind (0 = every row stays visible)
   level: EXPAND_DEPTH,       // call-tree levels open below the entry (node at depth d is open iff d < level)
   expanded: new Set(),       // explicit opens beyond the level (instance-agnostic paths "ISR/0/2")
   collapsed: new Set(),      // explicit closes inside the level
@@ -79,7 +79,7 @@ const S = {
   allInst: false,            // draw the subtree for every periodic instance (expensive for long windows)
   tscale: 1,                 // row-height stretch factor
   range: null,               // {start, end} in us (NW frame) -> the diagram shows only this part of the window
-  view: V.default_view === '3d' ? 'persp' : (V.default_view === 'aligned' ? 'aligned' : 'tilt'),   // tilt | aligned | persp
+  view: V.default_view === '3d' ? 'persp' : (V.default_view === 'tilt' ? 'tilt' : 'aligned'),   // aligned (one time axis for every core) | tilt | persp
   swDepth: Math.max(1, +((V.sw_structure || {}).depth || SWS.depth || 3)),
   hwDepth: Math.max(1, +((V.hw_structure || {}).depth || HWS.depth || 2)),
   swOpen: new Set((V.sw_structure || {}).open || []), swClosed: new Set(),     // structure diagram: nodes opened beyond / closed inside the depth

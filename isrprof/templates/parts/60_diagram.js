@@ -4,43 +4,97 @@
 // The SVG is rebuilt only when the structure changes (depth, open / close, size); a selection change just
 // toggles classes and badge texts on the existing elements, so focusing stays instant on big trees.
 const DG = {};   // host id -> {layout, svg, pz, items, boxes}
+const DIAG_MAX_VH = Math.max(0.15, Math.min(0.8, +((V.diagram || {}).max_vh || 0.38)));   // a structure window grows with its content up to this share of the screen
+const DIAG_MIN_K = Math.max(0.3, Math.min(1, +((V.diagram || {}).min_scale || 0.7)));      // below this scale the diagram is not shrunk further (pan / zoom instead)
 // clip a label to a pixel width (average glyph widths of the two fonts used in the diagrams)
 function fitText(str, maxPx, cw) { str = String(str == null ? '' : str); const n = Math.max(1, Math.floor(maxPx / (cw || 6.4))); return str.length <= n ? str : (n > 2 ? str.slice(0, n - 1) + '…' : str.slice(0, n)); }
 
+// Skyline packer: items {span (columns), h} placed in order into `ncols` columns, each at the lowest free
+// position (ties: leftmost).  Later short items fill the gaps left under earlier tall ones, so a page or a
+// container is filled instead of showing holes next to its tallest member.  Order is kept, positions are not
+// strictly row-major.
+function packSkylineOrder(items, order, ncols, gap) {
+  const sky = new Array(ncols).fill(0), pos = new Array(items.length);
+  for (const i of order) {
+    const it = items[i], span = Math.max(1, Math.min(ncols, it.span | 0));
+    let best = null;
+    for (let c = 0; c + span <= ncols; c++) {
+      let y = 0; for (let j = c; j < c + span; j++) y = Math.max(y, sky[j]);
+      if (!best || y < best.y - 1e-6) best = { c, y };
+    }
+    pos[i] = { col: best.c, y: best.y, span };
+    for (let j = best.c; j < best.c + span; j++) sky[j] = best.y + it.h + gap;
+  }
+  return { pos, height: items.length ? Math.max(...sky) - gap : 0 };
+}
+function packSkyline(items, ncols, gap) {
+  // document order first; when placing the tall members first packs clearly tighter (classic first-fit
+  // decreasing), that order is used instead - the hierarchy is unchanged, only siblings move
+  const idx = items.map((_, i) => i), a = packSkylineOrder(items, idx, ncols, gap);
+  if (items.length < 3 || ncols < 2) return a;
+  const b = packSkylineOrder(items, [...idx].sort((i, j) => (items[j].h * items[j].span) - (items[i].h * items[i].span) || i - j), ncols, gap);
+  return b.height < a.height * 0.92 ? b : a;
+}
+// items (functions / registers) flow into as many columns as the widest label allows
+function itemGrid(items, w, opt) {
+  if (!items.length) return { cols: 1, rows: 0, h: 0, colW: w - 8 };
+  const maxPx = Math.max(...items.map(it => String(it.label).length)) * opt.itemCw + 18;
+  const cols = Math.max(1, Math.min(items.length, Math.floor((w - 8 + 4) / (maxPx + 4))));
+  const rows = Math.ceil(items.length / cols);
+  return { cols, rows, h: rows * opt.itemH + 5, colW: (w - 8 - 4 * (cols - 1)) / cols };
+}
 function nestedLayout(byId, roots, opt) {
-  // opt: {depth, open, closed, pageW, cols, leafW, leafH, pad, header, itemsOf(node)->[{id,label}], itemH}
-  const boxes = new Map();
+  // opt: {depth, open, closed, pageW, aspect, maxCols, leafW, leafH, pad, header, itemsOf(node)->[{id,label}], itemH, itemCw}
+  // The page is a grid of NC columns (pitch = leaf width + pad, stretched so the columns fill the page
+  // width exactly).  A container spans c columns, c chosen so that its aspect ratio approaches `aspect`
+  // (= host aspect), and its children are skyline-packed into c sub-columns; leaves span one column.
+  const boxes = new Map(), pad = opt.pad;
   // depth = number of nested levels drawn: a node is open by default while its children are still inside that depth
   const isOpenNode = n => n.children.length && (opt.closed.has(n.id) ? false : (opt.open.has(n.id) ? true : n.depth < opt.depth - 1));
-  function measure(n, availW) {
+  const memo = new Map();
+  function measure(n, pitch, maxSpan, forceSpan) {
+    const key = n.id + '|' + Math.round(pitch) + '|' + maxSpan + '|' + (forceSpan == null ? '' : forceSpan);
+    if (memo.has(key)) return memo.get(key);
     const items = opt.itemsOf(n), showItems = items.length && (opt.open.has(n.id) || (!n.children.length && opt.itemsDefault && n.depth < opt.depth - 1));
+    let res;
     if (!isOpenNode(n)) {
-      const h = opt.leafH + (showItems ? items.length * opt.itemH + 6 : 0);
-      return { w: Math.min(availW, opt.leafW), h, open: false, items: showItems ? items : [] };
+      const ig = itemGrid(showItems ? items : [], pitch - pad, opt);
+      res = { span: 1, h: opt.leafH + ig.h, open: false, items: showItems ? items : [], ig };
+    } else {
+      const kids = n.children.map(id => byId[id]).filter(Boolean), cp = pitch - pad;   // child pitch (estimate; the exact one is set at placement)
+      const ms = kids.map(k => measure(k, cp, maxSpan));
+      const area = ms.reduce((a, m) => a + m.span * cp * m.h, 0), spans = ms.reduce((a, m) => a + m.span, 0);
+      let c = forceSpan != null ? forceSpan : Math.round(Math.sqrt(opt.aspect * area) / cp);
+      c = Math.max(1, ...ms.map(m => m.span), Math.min(c, maxSpan, spans));
+      const pk = packSkyline(ms.map(m => ({ span: m.span, h: m.h })), c, pad);
+      res = { span: c, c, h: opt.header + pad + pk.height + pad, open: true, kids, ms, pk, items: [] };
     }
-    const kids = n.children.map(id => byId[id]).filter(Boolean), pad = opt.pad;
-    const ncols = Math.max(1, Math.min(kids.length, opt.cols, Math.floor((availW - pad) / (opt.minColW + pad))));
-    const innerW = availW - pad * 2, colW = (innerW - pad * (ncols - 1)) / ncols;
-    const ms = kids.map(k => measure(k, colW));
-    const rows = []; let row = [], rowW = 0;
-    ms.forEach((m, i) => { if (row.length && (rowW + m.w + pad > innerW || row.length >= ncols)) { rows.push(row); row = []; rowW = 0; } row.push({ k: kids[i], m }); rowW += m.w + pad; });
-    if (row.length) rows.push(row);
-    let h = opt.header + pad, w = opt.leafW;
-    rows.forEach(r => { h += Math.max(...r.map(x => x.m.h)) + pad; w = Math.max(w, r.reduce((a, x) => a + x.m.w + pad, pad)); });
-    return { w: Math.max(Math.min(availW, Math.max(w, opt.leafW)), n.depth === 0 ? Math.min(availW, w) : availW), h, open: true, rows, items: [] };
+    memo.set(key, res); return res;
   }
-  function place(n, m, x, y) {
-    boxes.set(n.id, { id: n.id, x, y, w: m.w, h: m.h, open: m.open, items: m.items, node: n });
+  function place(n, m, x, y, pitch) {
+    const w = m.span * pitch - pad;
+    boxes.set(n.id, { id: n.id, x, y, w, h: m.h, open: m.open, items: m.items, ig: m.ig, node: n });
     if (!m.open) return;
-    let cy = y + opt.header + opt.pad;
-    m.rows.forEach(r => { let cx = x + opt.pad; const rh = Math.max(...r.map(z => z.m.h)); r.forEach(z => { place(z.k, z.m, cx, cy); cx += z.m.w + opt.pad; }); cy += rh + opt.pad; });
+    const cp = (w - pad) / m.c;
+    m.pk.pos.forEach((p, i) => place(m.kids[i], m.ms[i], x + pad + p.col * cp, y + opt.header + pad + p.y, cp));
   }
-  const rootNodes = roots.map(id => byId[id]), ncols = Math.max(1, Math.min(rootNodes.length, opt.cols));
-  const colW = (opt.pageW - opt.pad * (ncols - 1)) / ncols;
-  const ms = rootNodes.map(r => measure(r, colW));
-  let x = 0, y = 0, rowH = 0, maxW = 0;
-  ms.forEach((m, i) => { if (x > 0 && x + m.w > opt.pageW + 1) { x = 0; y += rowH + opt.pad; rowH = 0; } place(rootNodes[i], m, x, y); x += m.w + opt.pad; rowH = Math.max(rowH, m.h); maxW = Math.max(maxW, x); });
-  return { boxes, width: Math.max(maxW, 10), height: y + rowH + 4 };
+  const rootNodes = roots.map(id => byId[id]).filter(Boolean);
+  const NC = Math.max(1, Math.min(opt.maxCols, Math.floor((opt.pageW + pad) / (opt.leafW + pad)))), pitch = (opt.pageW + pad) / NC;
+  // root spans: the aspect heuristic, and alternatives where every root gets the width that makes it as tall as
+  // the others when the page is tiled in 1, 2, 3 ... rows; the candidate packing with the lowest height wins
+  const base = rootNodes.map(r => measure(r, pitch, NC)), area = base.map(m => m.span * pitch * m.h), total = area.reduce((a, b) => a + b, 0);
+  const cands = [base];
+  for (let rows = 1; rows <= Math.min(4, rootNodes.length); rows++) {
+    const H = total / (rows * NC * pitch); if (!(H > 0)) break;
+    const spans = area.map(a => Math.max(1, Math.min(NC, Math.round(a / (H * pitch)))));
+    if (spans.reduce((a, b) => a + b, 0) > rows * NC + Math.ceil(NC / 2)) continue;
+    cands.push(rootNodes.map((r, i) => measure(r, pitch, NC, spans[i])));
+  }
+  let ms = null, pk = null;
+  cands.forEach(cm => { const p = packSkyline(cm.map(m => ({ span: m.span, h: m.h })), NC, pad); if (!pk || p.height < pk.height * 0.97) { ms = cm; pk = p; } });
+  let maxW = 0;
+  pk.pos.forEach((p, i) => { place(rootNodes[i], ms[i], p.col * pitch, p.y, pitch); maxW = Math.max(maxW, (p.col + p.span) * pitch - pad); });
+  return { boxes, width: Math.max(maxW, 10), height: pk.height + 4, columns: NC };
 }
 const visibleBox = (layout, byIdAnc, id) => { if (layout.boxes.has(id)) return layout.boxes.get(id); for (const a of (byIdAnc[id] || [])) if (layout.boxes.has(a)) return layout.boxes.get(a); return null; };
 
@@ -57,7 +111,19 @@ function edgePath(a, b) {
 function panZoom(host, svg, w, h) {
   const st = DG[host.id] && DG[host.id].pz && DG[host.id].pz.keep ? DG[host.id].pz : { x: 0, y: 0, k: 1 };
   const apply = () => { const W = host.clientWidth || 800, H = host.clientHeight || 400; svg.setAttribute('viewBox', `${st.x} ${st.y} ${W / st.k} ${H / st.k}`); };
-  const fit = () => { const W = host.clientWidth || 800; st.k = Math.min(W / (w + 8), 1.4); if (!host.dataset.userH) host.style.height = Math.max(120, Math.min(Math.round(window.innerHeight * 0.22), Math.round(h * st.k + 14))) + 'px'; st.x = -4; st.y = -4; st.keep = false; apply(); };
+  // fit: the whole diagram in the window - scale to the width, and to the height when the window height is
+  // fixed by the user; otherwise the window grows with the content up to a share of the screen, then the
+  // diagram is scaled down (not below DIAG_MIN_K, so the labels stay legible; the rest is reached by panning)
+  const fit = () => {
+    const W = host.clientWidth || 800; st.k = Math.min(W / (w + 8), 1.4);
+    if (!host.dataset.userH) {
+      const cap = Math.max(140, Math.round(window.innerHeight * DIAG_MAX_VH));
+      let hostH = Math.round(h * st.k + 12);
+      if (hostH > cap) { st.k = Math.max(DIAG_MIN_K, Math.min(st.k, (cap - 12) / (h + 4))); hostH = Math.min(cap, Math.round(h * st.k + 12)); }
+      host.style.height = Math.max(90, hostH) + 'px';
+    } else { const H = host.clientHeight || 300; st.k = Math.max(DIAG_MIN_K, Math.min(st.k, (H - 8) / (h + 4))); }
+    st.x = -4; st.y = -4; st.keep = false; apply();
+  };
   const zoom = (f, cx, cy) => { const W = host.clientWidth || 800, H = host.clientHeight || 400; const px = st.x + cx / st.k, py = st.y + cy / st.k; st.k = Math.max(0.15, Math.min(6, st.k * f)); st.x = px - cx / st.k; st.y = py - cy / st.k; st.keep = true; apply(); void W; void H; };
   if (!st.keep) fit(); else apply();
   if (!host._pzBound) {
@@ -74,18 +140,21 @@ function panZoom(host, svg, w, h) {
 function renderNested(host, spec) {
   // spec: {byId, roots, anc, depth, open, closed, cols, itemsOf, itemsDefault, kindOf, labelOf, subOf, edges:[{from,to,kind,label}], leafW, onToggle, onSelect, onItem, tipNode, tipItem, extraClass}
   const W = Math.max(host.clientWidth || 900, 320);
-  const opt = { depth: spec.depth, open: spec.open, closed: spec.closed, pageW: W - 8, cols: spec.cols || 4, leafW: spec.leafW || 190, minColW: spec.minColW || 140, leafH: 30, pad: 6, header: 22, itemsOf: spec.itemsOf, itemsDefault: spec.itemsDefault, itemH: 13 };
+  const targetH = host.dataset.userH ? (host.clientHeight || 300) : Math.max(140, Math.round(window.innerHeight * DIAG_MAX_VH));
+  const opt = { depth: spec.depth, open: spec.open, closed: spec.closed, pageW: W - 8, maxCols: Math.max(1, spec.maxCols || 12), aspect: Math.max(1.2, Math.min(5, (W - 8) / targetH)),
+    leafW: spec.leafW || 190, leafH: 28, pad: 5, header: 20, itemsOf: spec.itemsOf, itemsDefault: spec.itemsDefault, itemH: 12, itemCw: 5.7 };
   const layout = nestedLayout(spec.byId, spec.roots, opt);
   const boxes = layout.boxes, out = [], items = new Map(), boxEl = new Map();
   const ordered = [...boxes.values()].sort((a, b) => a.node.depth - b.node.depth);
   for (const b of ordered) {
     const n = b.node, kind = spec.kindOf(n), cnt = spec.countOf ? spec.countOf(n) : '';
     out.push(`<g class="nd k-${esc(kind)} d${Math.min(n.depth, 2)} ${spec.extraClass ? spec.extraClass(n) : ''}" data-id="${esc(n.id)}"><rect class="bx" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="5"/>` +
-      `<text class="ttl" x="${b.x + 7}" y="${b.y + 13}">${b.node.children.length ? (b.open ? '▾ ' : '▸ ') : ''}${esc(fitText(spec.labelOf(n), b.w - 52, n.depth === 0 ? 6.4 : 6.1))}</text>` +
-      `<text class="sub" x="${b.x + 7}" y="${b.y + 24}">${esc(fitText(spec.subOf(n, b), b.w - 12, 5.4))}</text><text class="cnt" x="${b.x + b.w - 5}" y="${b.y + 13}"></text>`);
+      `<text class="ttl" x="${b.x + 6}" y="${b.y + 12}">${b.node.children.length ? (b.open ? '▾ ' : '▸ ') : ''}${esc(fitText(spec.labelOf(n), b.w - 50, n.depth === 0 ? 6.4 : 6.1))}</text>` +
+      `<text class="sub" x="${b.x + 6}" y="${b.y + 22}">${esc(fitText(spec.subOf(n, b), b.w - 10, 5.2))}</text><text class="cnt" x="${b.x + b.w - 4}" y="${b.y + 12}"></text>`);
+    const ig = b.ig || itemGrid(b.items, b.w, opt);
     b.items.forEach((it, i) => {
-      const iy = b.y + opt.leafH + i * opt.itemH;
-      out.push(`<g class="it ${it.cls || ''}" data-id="${esc(it.id)}" data-node="${esc(n.id)}"><rect x="${b.x + 4}" y="${iy}" width="${b.w - 8}" height="${opt.itemH - 1}" rx="3"/><text x="${b.x + 9}" y="${iy + 10}">${esc(fitText(it.label, b.w - 44, 5.7))}</text><text class="itag" x="${b.x + b.w - 7}" y="${iy + 10}" text-anchor="end"></text></g>`);
+      const col = i % ig.cols, row = Math.floor(i / ig.cols), ix = b.x + 4 + col * (ig.colW + 4), iy = b.y + opt.leafH + row * opt.itemH;
+      out.push(`<g class="it ${it.cls || ''}" data-id="${esc(it.id)}" data-node="${esc(n.id)}"><rect x="${ix}" y="${iy}" width="${ig.colW}" height="${opt.itemH - 1}" rx="3"/><text x="${ix + 5}" y="${iy + 9.5}">${esc(fitText(it.label, ig.colW - 34, opt.itemCw))}</text><text class="itag" x="${ix + ig.colW - 3}" y="${iy + 9.5}" text-anchor="end"></text></g>`);
       items.set(it.id, { node: n.id, it });
     });
     out.push('</g>');
@@ -147,8 +216,8 @@ function renderSW() {
   const host = document.getElementById('sw');
   if (!SWS.nodes.length) { host.innerHTML = '<div class="empty">No SW structure declared (sw_structure.yaml) and nothing detected.</div>'; return; }
   renderNested(host, {
-    byId: SWN, roots: swRoots(), anc: SWL.anc, depth: S.swDepth, open: S.swOpen, closed: S.swClosed, cols: +((V.sw_structure || {}).columns || 4),
-    itemsOf: swItemsOf, itemsDefault: true, leafW: 200,
+    byId: SWN, roots: swRoots(), anc: SWL.anc, depth: S.swDepth, open: S.swOpen, closed: S.swClosed, maxCols: +((V.sw_structure || {}).columns || 12),
+    itemsOf: swItemsOf, itemsDefault: true, leafW: +((V.sw_structure || {}).leaf_px || 196),
     kindOf: n => n.kind, labelOf: n => n.name,
     subOf: n => { const nf = NODE_FIDS[n.id].size, nv = n.variables.length + SWL.desc[n.id].reduce((a, d) => a + SWN[d].variables.length, 0); return [n.kind !== 'module' && n.kind !== 'subsystem' ? n.kind : '', n.type, nf ? nf + ' fn' : '', nv ? nv + ' var' : '', n.core != null && n.depth === 0 ? 'core ' + n.core : ''].filter(Boolean).join(' · '); },
     extraClass: n => (n.implicit ? 'implicit ' : '') + (S.swNode === n.id ? 'sel' : ''),
@@ -203,8 +272,8 @@ function renderHW() {
   const host = document.getElementById('hw');
   if (!HWS.nodes.length) { host.innerHTML = '<div class="empty">No HW structure declared (hw_structure.yaml).</div>'; return; }
   renderNested(host, {
-    byId: HWN, roots: hwRoots(), anc: HWL.anc, depth: S.hwDepth, open: S.hwOpen, closed: S.hwClosed, cols: +((V.hw_structure || {}).columns || 4),
-    itemsOf: hwItemsOf, itemsDefault: false, leafW: 180,
+    byId: HWN, roots: hwRoots(), anc: HWL.anc, depth: S.hwDepth, open: S.hwOpen, closed: S.hwClosed, maxCols: +((V.hw_structure || {}).columns || 12),
+    itemsOf: hwItemsOf, itemsDefault: false, leafW: +((V.hw_structure || {}).leaf_px || 176),
     kindOf: n => n.kind, labelOf: n => n.name,
     subOf: n => { const b = BX[n.id]; if (!b) return (n.kind || '') + (n.children.length ? ' · ' + n.children.length + ' blocks' : ''); return [b.id, b.base, b.deadlines.length ? '⏱' + b.deadlines.length : '', (TIX[b.line] || {}).name].filter(Boolean).join(' · '); },
     extraClass: n => (n.id.startsWith('_auto') ? 'implicit ' : '') + (S.block === n.id ? 'sel' : ''),

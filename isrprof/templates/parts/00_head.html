@@ -81,21 +81,25 @@ input[type="range"] { vertical-align: middle; width: 80px; accent-color: var(--a
 aside#side { position: sticky; top: 4px; display: flex; flex-direction: column; gap: 0; min-width: 0; height: calc(100vh - 8px); }
 aside#side > details.panel { display: flex; flex-direction: column; min-height: 0; margin: 0; overflow: hidden; }
 aside#side > details.panel:not([open]) { flex: 0 0 auto; }
-#tree-panel[open] { flex: 0 0 var(--tree-h, 48%); }
+#tree-panel[open] { flex: 0 0 var(--tree-h, 48vh); }
 #detail-panel[open] { flex: 1 1 0; }
 aside#side > details.panel > .body { flex: 1 1 0; min-height: 0; overflow: auto; }
 /* Chromium 131+ wraps the slotted content of <details> in a ::details-content box; make that box the flex item so the
    panel body is still bounded by the panel height (and scrolls) instead of growing and being clipped. */
 aside#side > details.panel::details-content { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
 aside#side > details.panel::details-content > .body { flex: 1 1 0; min-height: 0; overflow: auto; }
-#tree, #detail { height: auto; max-height: none; overflow: auto; min-height: 0; }   /* the panel body itself scrolls; the flex basis of the panel sets its height */
+/* the panel bodies scroll vertically; the flex basis of the panel sets their height, and the max-heights below are
+   the fallback for browsers without ::details-content, so a long call graph / details list always scrolls inside
+   its window instead of pushing the page */
+#tree, #detail { height: auto; overflow: auto; min-height: 0; overscroll-behavior: contain; }
+#tree { max-height: calc(var(--tree-h, 48vh) - 30px); }
+#detail { max-height: calc(100vh - var(--tree-h, 48vh) - 72px); }
+#tree-panel:not([open]) ~ #detail-panel #detail { max-height: calc(100vh - 80px); }
 #hsplit { height: 9px; margin: 2px 10px; border-radius: 4px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; touch-action: none; flex: 0 0 auto; }
 #hsplit i { display: block; width: 44px; height: 3px; border-radius: 2px; background: var(--line-strong); }
 #hsplit:hover, #hsplit.on { background: var(--accent-soft); } #hsplit:hover i, #hsplit.on i { background: var(--accent); }
 aside#side .panel { margin-top: 0; }
 #tree, #detail { overflow: auto; min-width: 0; }
-#tree { max-height: 46vh; }
-#detail { max-height: 44vh; }
 #side h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
 .tree ul { list-style: none; margin: 0; padding-left: 14px; }
 .tree > ul { padding-left: 0; }
@@ -139,7 +143,7 @@ table.t tr.viol td { color: var(--critical); }
 .diagram .nd > text.ttl { font-weight: 600; font-size: 11px; }
 .diagram .nd.d0 > text.ttl { font-size: 11.5px; }
 .diagram .nd.d2 > text.ttl { font-size: 10.5px; }
-.diagram .nd > text.sub { fill: var(--muted); font-size: 9.5px; font-family: var(--mono); }
+.diagram .nd > text.sub { fill: var(--muted); font-size: 9px; font-family: var(--mono); }
 .diagram .nd > text.cnt { font-family: var(--mono); font-size: 10px; font-weight: 600; text-anchor: end; }
 .diagram .nd.dim > rect.bx { opacity: .45; }
 .diagram .nd.dim > text { opacity: .45; }
@@ -208,8 +212,7 @@ label.chk input { accent-color: var(--accent); margin: 0; }
 #splitter { cursor: ew-resize; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; touch-action: none; align-self: stretch; }
 #splitter i { display: block; width: 2px; height: 40px; border-radius: 1px; background: var(--line-strong); }
 #splitter:hover, #splitter.on { background: var(--accent-soft); border-color: var(--accent); } #splitter:hover i, #splitter.on i { background: var(--accent); }
-@media (max-width: 1000px) { #splitter { display: none; } }
-#tree, #detail { max-height: none; }
+@media (max-width: 1000px) { #splitter { display: none; } aside#side { position: static; height: auto; } }
 
 .cgnav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 2px; }
 .cgnav .tog.mini:disabled { opacity: .4; cursor: default; }

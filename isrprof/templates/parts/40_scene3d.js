@@ -15,10 +15,11 @@ const ROW_PX = Math.max(6, +(V.row_px || 15));
 const TILT_DX_PX = +(V.tilt_dx_px == null ? 36 : V.tilt_dx_px);
 const CH_ROW_PX = Math.max(6, +((V.channels || {}).row_px || 12));
 const MAX_BOXES = Math.max(1000, +(V.max_boxes || 40000)), MAX_LABELS = Math.max(50, +(V.max_labels || 700));
+const SCENE_MAX_VH = Math.max(0.2, Math.min(0.9, +((V.diagram || {}).scene_max_vh || 0.6)));   // the timing window grows with its rows up to this share of the screen
 // type scale (px): slot labels, symbol numbers, channel names, core header, ISR name, ISR sub line, box labels,
 // deadline ticks, reference lines, axis captions - converted to world units per build with fh()
 const FS = { slot: 12, sym: 10, ch: 10, plane: 13, isr: 12, sub: 10, box: 11, dl: 10, ref: 10, axis: 10 };
-const LEVEL_H = 0.3, BOX_H = 0.24, LANE_PAD = 0.07, ISR_GAP = 0.04, PLANE_HDR = 0.3, PLANE_GAP = 0.3, RULER_GAP = 0.9, ZBACK = -0.7;
+const LEVEL_H = 0.3, BOX_H = 0.24, LANE_PAD = 0.07, ISR_GAP = 0.04, PLANE_HDR = 0.3, PLANE_GAP = 0.3, ZBACK = -0.7;
 let SX = 0.5;                                      // world units per symbol (set per build)
 const ortho = () => S.view !== 'persp';
 const PLANE_DZ = () => (S.view === 'persp' ? 4.0 : 1.3);   // z step per core plane: a plane's backing plate (dz + ZBACK) must sit in front of the previous plane's boxes and labels   // z step per core plane: higher cores sit in front of the previous ones
@@ -54,11 +55,14 @@ function channelActive(c, s) {
   if (sl === 'special') return t === 'S';
   return false;
 }
-function computeLayout(k) {
+function computeLayout(k, refRows) {
   const chRows = channelRows(), chH = CH_ROW_PX * k;
   let y = 0;
   const ruler = { yTop: 0.34, chTop: 0, chH, rows: chRows, yBot: -chRows.length * chH };
-  y = ruler.yBot - RULER_GAP;
+  // the gap under the ruler holds the reference-line labels (one row per non-overlapping label row)
+  const rulerGap = Math.max(0.35, (refRows || 0) * FS.ref * 1.35 * k + 10 * k);
+  ruler.gap = rulerGap;
+  y = ruler.yBot - rulerGap;
   const planes = [];
   const stacked = S.view === 'tilt', persp = S.view === 'persp', ov = stacked ? S.overlap : 0;
   let idx = 0, prevH = 0, yStart = y, yMin = y;
@@ -275,15 +279,22 @@ function bars(xs, y0, y1, z, color, opacity, widthPx, k) {
   xs.forEach((x, i) => { mat.makeScale(w, Math.abs(y1 - y0), 1); mat.setPosition(x, (y0 + y1) / 2, z); m.setMatrixAt(i, mat); });
   m.instanceMatrix.needsUpdate = true; m.frustumCulled = false; return m;
 }
-// faint band over every other slot so the slot rhythm is visible even when the symbol grid is dense
+// slot tint: with a TDD pattern the special (S) and uplink (U) slots get a faint tint (downlink slots stay plain),
+// without one every other slot is tinted so the slot rhythm stays visible when the symbol grid is dense
+const SLOT_BANDS = V.slot_bands !== false;
+function slotTint(s) {
+  if (!SLOT_BANDS) return null;
+  if (CH.tdd_pattern) { const t = slotType(s); return t === 'U' ? { c: chColor({ dir: 'ul' }), op: 0.07 } : t === 'S' ? { c: cssVar('--warn'), op: 0.09 } : null; }
+  return ((s % 2) + 2) % 2 === 1 ? { c: cssVar('--fg'), op: 0.045 } : null;
+}
 function slotBands(tx, x0, x1, y0, y1, z, color, slotA, slotB, dx) {
-  const xs = [], ws = [];
-  for (let sIdx = slotA - 1; sIdx <= slotB; sIdx++) { if (((sIdx % 2) + 2) % 2 !== 1) continue; const a = Math.max(tx(sIdx * SLOT), x0), b = Math.min(tx((sIdx + 1) * SLOT), x1); if (b <= a) continue; xs.push((a + b) / 2 + dx); ws.push(b - a); }
+  const xs = [], ws = [], cs = [];
+  for (let sIdx = slotA - 1; sIdx <= slotB; sIdx++) { const t = slotTint(sIdx); if (!t) continue; const a = Math.max(tx(sIdx * SLOT), x0), b = Math.min(tx((sIdx + 1) * SLOT), x1); if (b <= a) continue; xs.push((a + b) / 2 + dx); ws.push(b - a); cs.push(t); }
   if (!xs.length) return null;
-  const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.045, depthWrite: false }), xs.length);
-  const mat = new THREE.Matrix4();
-  xs.forEach((x, i) => { mat.makeScale(ws[i], Math.abs(y1 - y0), 1); mat.setPosition(x, (y0 + y1) / 2, z); m.setMatrixAt(i, mat); });
-  m.instanceMatrix.needsUpdate = true; m.frustumCulled = false; return m;
+  const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: cs[0].op, depthWrite: false }), xs.length);
+  const mat = new THREE.Matrix4(), col = new THREE.Color();
+  xs.forEach((x, i) => { mat.makeScale(ws[i], Math.abs(y1 - y0), 1); mat.setPosition(x, (y0 + y1) / 2, z); m.setMatrixAt(i, mat); col.set(cs[i].c); m.setColorAt(i, col); });
+  m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; m.frustumCulled = false; void color; return m;
 }
 function instanced(geo, n, opts) {
   const mat = opts.lambert ? new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: !!opts.opacity, opacity: opts.opacity || 1, depthWrite: !opts.opacity })
@@ -298,9 +309,27 @@ function build3D() {
   clearGroup(root); pick3 = []; hovered = null; root.position.x = 0;
   const Wc = Math.max(sceneEl.clientWidth, 400), plotPx = Math.max(Wc - STRIP_L - STRIP_R, 200);
   ext.k = LEVEL_H / (ROW_PX * S.tscale);
-  const k = ext.k, L = computeLayout(k), { ruler, planes, height } = L, tm = { layout: Math.round(performance.now() - t0) };
-  const fh = px => px * k;                            // font height in world units for a pixel size
+  const k = ext.k, fh = px => px * k;                 // font height in world units for a pixel size
   const r0 = R0(), r1 = R1(), nSym = Math.max((r1 - r0) / SYM, 0.5);
+  const slotA = Math.ceil(r0 / SLOT - 1e-9), slotB = Math.floor(r1 / SLOT + 1e-9);
+  // reference lines: which ones matter (used by a visible ISR or carrying HW deadlines) and where their labels go.
+  // Labels are placed under the channel band at the line's first occurrence; a label that would overlap the
+  // previous one in its row drops to the next row (greedy), so nothing is written over anything else.
+  const refIds = TI.filter(t => t.id !== 'nw' && !S.refHidden.has(t.id));
+  const refColor = t => t.color || cat(TIX[t.id].idx + 2);
+  const usedAll = new Set(visibleIsrs().map(i => i.timing)), hwLines = new Set(BLOCKS.map(b => b.line));
+  const strongOf = t => usedAll.has(t.id) || hwLines.has(t.id);
+  const nPlanesEst = CORES.filter(c => S.cores.has(c.id)).length, maxDxPxEst = (S.view === 'tilt' ? TILT_DX_PX : 0) * Math.max(0, nPlanesEst - 1);
+  const pxPerSymEst = Math.max(0.1, (plotPx - maxDxPxEst) / nSym), pxOfUs = us => (us - r0) / SYM * pxPerSymEst;
+  const refGroups = new Map();
+  refIds.filter(strongOf).forEach(t => { const key = t.offset_us.toFixed(3); const g = refGroups.get(key) || { off: t.offset_us, names: [], t }; g.names.push(t.name); refGroups.set(key, g); });
+  const refLabels = [...refGroups.values()].sort((a, b) => a.off - b.off).map(g => {
+    let first = null; for (let s = slotA - 1; s <= slotB; s++) { const x = pxOfUs(s * SLOT + g.off); if (x >= -1e-6 && x <= plotPx + 1e-6) { first = x; break; } }
+    return first == null ? null : Object.assign(g, { txt: `${g.names.join(' / ')} ${g.off >= 0 ? '+' : ''}${(g.off / SYM).toFixed(2)}`, px: first });
+  }).filter(Boolean);
+  { const rowEnd = []; [...refLabels].sort((a, b) => a.px - b.px).forEach(l => { const w = l.txt.length * FS.ref * 0.62 + 10; let r = 0; while (rowEnd[r] != null && rowEnd[r] > l.px) r++; l.row = r; rowEnd[r] = l.px + w; }); }
+  const refRows = refLabels.length ? Math.max(...refLabels.map(l => l.row)) + 1 : 0;
+  const L = computeLayout(k, refRows), { ruler, planes, height } = L, tm = { layout: Math.round(performance.now() - t0) };
   SX = (plotPx - L.maxDx / k) * k / nSym;              // the time range fills the plot width (minus the diagonal shift)
   const tx = us => (us - r0) / SYM * SX;
   const x0 = 0, x1 = tx(r1), yTop = ruler.yTop, yBot = -height - 0.2;
@@ -308,20 +337,22 @@ function build3D() {
   const panelC = new THREE.Color(cssVar('--panel')), panel2C = new THREE.Color(cssVar('--panel-2')), lineC = new THREE.Color(cssVar('--line-strong')), gridC = new THREE.Color(cssVar('--line')), fg = new THREE.Color(cssVar('--fg'));
   const critC = new THREE.Color(cssVar('--critical')), readC = new THREE.Color(cssVar('--read')), writeC = new THREE.Color(cssVar('--write')), accentC = new THREE.Color(cssVar('--accent')), mutedC = cssVar('--muted'), seriousC = new THREE.Color(cssVar('--serious'));
   const persp = S.view === 'persp', dzStep = persp ? 0.35 : 0.02;
-  const pxPerSym = SX / k, symLines = pxPerSym >= 4, symLabels = pxPerSym >= 34, labelMinW = 40 * k;
+  const pxPerSym = SX / k, symLines = pxPerSym >= 4, labelMinW = 40 * k;
+  // symbol numbers: every symbol when they fit, else every 2nd, else only the slot middle (symbol 7); the slot label wins
+  const symEvery = pxPerSym >= 30 ? 1 : pxPerSym >= 15 ? 2 : pxPerSym >= 5 ? Math.max(2, Math.floor(SPS / 2)) : 0;
   const emphasis = !!(REL || S.block);
   if (V.legend === false) document.getElementById('legend').hidden = true;
-  const slotA = Math.ceil(r0 / SLOT - 1e-9), slotB = Math.floor(r1 / SLOT + 1e-9);
 
   // --- ruler: slot / symbol labels + channel allocation band (drawn at plane 0's offset)
   const gridStrong = [], gridWeak = [], slotXs = [];
   for (let i = Math.ceil(r0 / SYM - 1e-9); i <= Math.floor(r1 / SYM + 1e-9); i++) {
-    const isSlot = ((i % SPS) + SPS) % SPS === 0; if (!isSlot && !symLines) continue;
+    const isSlot = ((i % SPS) + SPS) % SPS === 0, symIdx = ((i % SPS) + SPS) % SPS; if (!isSlot && !symLines) continue;
     const x = tx(i * SYM);
     if (isSlot) slotXs.push(x); else gridWeak.push(x, ruler.yBot, ZBACK, x, ruler.yTop, ZBACK);
-    if (isSlot || symLabels) {
-      const txt = isSlot ? `s${i / SPS}${i === 0 ? ' (NW)' : ''}${isSlot && CH.tdd_pattern ? ' ' + slotType(i / SPS) : ''}` : `${((i % SPS) + SPS) % SPS}`;
+    if (isSlot || (symEvery && symIdx % symEvery === 0 && symIdx > 0 && (symEvery < 3 || symIdx <= SPS - 2))) {
+      const txt = isSlot ? `s${i / SPS}${i === 0 ? ' (NW)' : ''}${isSlot && CH.tdd_pattern ? ' ' + slotType(i / SPS) : ''}` : `${symIdx}`;
       const lb = label(txt, { color: isSlot ? cssVar('--fg') : mutedC, h: fh(isSlot ? FS.slot : FS.sym), bold: isSlot });
+      if (!isSlot && lb.scale.x > pxPerSym * k * symEvery * 0.9) continue;
       lb.position.set(x + lb.scale.x / 2 + 0.03, ruler.yTop + 0.14, ZBACK); root.add(lb);
     }
   }
@@ -345,33 +376,26 @@ function build3D() {
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; m.userData = { kind: 'ch' }; root.add(m); pick3.push(m); G.ch = m; G.chRecs = chRecs;
     chRecs.forEach(r => { if (r.w > labelMinW * 1.4 && pxPerSym >= 10) { const lb = label(r.c.name || r.c.id, { h: Math.min(fh(FS.ch), ruler.chH * 0.7), color: '#ffffff' }); if (lb.scale.x < r.w - 0.02) { lb.position.set(r.x + 0.02 + lb.scale.x / 2, r.y, ZBACK + 0.2); root.add(lb); } } });
   }
-  const refIds = TI.filter(t => t.id !== 'nw' && !S.refHidden.has(t.id));
-  const refColor = t => t.color || cat(TIX[t.id].idx + 2);
-  // reference lines on the NW ruler: from the slot-label row through the channel band to the first core plane,
-  // labelled once (name + offset vs NW) at their first occurrence - the per-plane lines continue them below
+  // reference lines on the NW ruler: from the slot-label row through the channel band to the first core plane
+  // (strong = used by a visible ISR or carrying HW deadlines; the others stay faint and end at the first plane),
+  // labelled once (name + offset vs NW) at their first occurrence in collision-free rows under the channel band
   {
     const continuous = S.view === 'aligned';     // no per-plane shift: one unbroken line down to the last plane
-    const refTop = ruler.yTop + 0.3, refBot = !planes.length ? ruler.yBot - RULER_GAP : (continuous ? planes[planes.length - 1].yBot : planes[0].yTop + 0.02);
-    const usedAll = new Set(visibleIsrs().map(i => i.timing)), hwLines = new Set(BLOCKS.map(b => b.line));
-    const strongOf = t => usedAll.has(t.id) || hwLines.has(t.id);
+    const refTop = ruler.yTop + 0.3, firstTop = !planes.length ? ruler.yBot - ruler.gap : planes[0].yTop + 0.02;
     refIds.forEach(t => {
-      const pts = [];
+      const strong = strongOf(t), refBot = strong && continuous && planes.length ? planes[planes.length - 1].yBot : firstTop, pts = [];
       for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + t.offset_us); if (x < -1e-6 || x > x1 + 1e-6) continue; pts.push(x, refBot, ZBACK + 0.01, x, refTop, ZBACK + 0.01); }
-      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: strongOf(t) ? 0.6 : 0.2 }); if (l) root.add(l);
+      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: strong ? 0.55 : 0.16 }); if (l) root.add(l);
     });
-    // one label per distinct offset (lines that share an offset share the label), staggered over three rows
-    const groups = new Map();
-    refIds.filter(strongOf).forEach(t => { const key = t.offset_us.toFixed(3); const g = groups.get(key) || { off: t.offset_us, names: [], t }; g.names.push(t.name); groups.set(key, g); });
-    [...groups.values()].sort((a, b) => a.off - b.off).forEach((g, gi) => {
-      let first = null; for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + g.off); if (x >= -1e-6 && x <= x1 + 1e-6) { first = x; break; } }
-      if (first == null) return;
-      const lb = label(`${g.names.join(' / ')} ${g.off >= 0 ? '+' : ''}${(g.off / SYM).toFixed(2)}`, { h: fh(FS.ref), color: refColor(g.t) });
-      lb.position.set(first + lb.scale.x / 2 + 0.02, ruler.yBot - 0.08 - (gi % 3) * fh(FS.ref) * 1.3 - fh(FS.ref) * 0.6, 0.3); root.add(lb);
+    refLabels.forEach(g => {
+      const lb = label(g.txt, { h: fh(FS.ref), color: refColor(g.t) });
+      lb.position.set(tx(g.px / pxPerSymEst * SYM + r0) + lb.scale.x / 2 + 0.02, ruler.yBot - 5 * k - g.row * fh(FS.ref) * 1.35 - fh(FS.ref) * 0.65, 0.3); root.add(lb);
     });
   }
 
   // --- planes: one per core
-  const recs = [], evRecs = [], touchRecs = [], envRecs = [], dlPts = [], labelCands = [];
+  const recs = [], evRecs = [], touchRecs = [], envRecs = [], gaugeRecs = [], dlPts = [], labelCands = [];
+  const seam = ortho() ? 1 * k : 0;                  // 1 px gap between adjacent boxes so neighbours of the same colour stay distinguishable
   let boxBudget = MAX_BOXES, lod = false;
   // LOD estimate: boxes if every instance drew its visible subtree
   const est = planes.reduce((a, p) => a + p.rows.reduce((b, row) => b + instancesOf(row.isr).length * visibleNodes(row.isr).length, 0), 0);
@@ -398,24 +422,35 @@ function build3D() {
     }
     { const sb = bars(pSlotXs, pl.yBot, pl.yTop, dz + ZBACK + 0.005, fg, 0.45, 2, k); if (sb) root.add(sb); const bd = slotBands(tx, x0, x1, pl.yBot, pl.yTop, dz + ZBACK - 0.01, fg, slotA, slotB, dx); if (bd) root.add(bd); }
     const gw = segs(gW, gridC, { opacity: 0.18 }); if (gw) root.add(gw);
-    // reference lines (dashed) repeated per slot; the ones used by this plane's ISRs are stronger
+    // reference lines (dashed) repeated per slot - only the ones this plane's ISRs are placed on (the ruler on
+    // top shows every line), so a plane carries just the lines that explain its rows
     const used = new Set(pl.isrs.map(i => i.timing));
-    if (S.view !== 'aligned') refIds.forEach(t => {        // per plane (planes are shifted / in depth): through the plane and the gap under it, so the line never breaks
+    if (S.view !== 'aligned') refIds.filter(t => used.has(t.id)).forEach(t => {        // per plane (planes are shifted / in depth): through the plane and the gap under it, so the line never breaks
       const yEnd = pl.k < planes.length - 1 ? Math.min(pl.yBot, planes[pl.k + 1].yTop) - 0.02 : pl.yBot;
       const pts = []; for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + t.offset_us); if (x < -1e-6 || x > x1 + 1e-6) continue; pts.push(x + dx, yEnd, dz + ZBACK + 0.01, x + dx, pl.yTop, dz + ZBACK + 0.01); }
-      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: used.has(t.id) ? 0.5 : 0.14 }); if (l) root.add(l);
+      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.5 }); if (l) root.add(l);
     });
+    // alternating row bands over the plane (label strip included) so a row can be followed across the slots
+    { const bx = [], bw = [], by = [], bh = []; pl.rows.forEach((row, ri) => { if (ri & 1) { bx.push((px0 + px1) / 2 - STRIP_L * k / 2); bw.push(px1 - px0 + STRIP_L * k); by.push((row.yTop + row.yBot) / 2); bh.push(row.yTop - row.yBot); } });
+      if (bx.length) { const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: fg, transparent: true, opacity: 0.035, depthWrite: false }), bx.length); const mt = new THREE.Matrix4(); bx.forEach((x, i) => { mt.makeScale(bw[i], bh[i], 1); mt.setPosition(x, by[i], dz + ZBACK - 0.015); m.setMatrixAt(i, mt); }); m.instanceMatrix.needsUpdate = true; m.frustumCulled = false; root.add(m); } }
     for (const row of pl.rows) {
       const isr = row.isr, ref = TIX[isr.timing], coreC = new THREE.Color(coreColor(isr.core));
       gW.length = 0;
-      root.add(segs([px0, row.yBot, dz + ZBACK, px1, row.yBot, dz + ZBACK], gridC, { opacity: 0.45 }));
+      root.add(segs([px0 - STRIP_L * k, row.yBot, dz + ZBACK, px1, row.yBot, dz + ZBACK], gridC, { opacity: 0.45 }));
       const twoLines = row.h >= fh(FS.isr + FS.sub) * 1.45 && !manyRows;
-      const t1 = label(isr.name, { bold: true, h: fh(FS.isr), color: (S.selPath && isrOfPath(S.selPath) === isr) ? cssVar('--accent') : cssVar('--fg') });
-      t1.position.set(px0 - 0.1 - t1.scale.x / 2, twoLines ? row.y + fh(FS.sub) * 0.65 : row.y, dz + 0.3); t1.userData = { isrRow: isr, title: `${isr.name}: ${ref.name} +${(isr.start_us / SYM).toFixed(2)} sym · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym budget' : 'no budget'}${isr.period_us ? ' · every ' + fmt(isr.period_us) : ''} · click to focus the ISR` }; root.add(t1); pick3.push(t1);
+      const selIsr = S.selPath && isrOfPath(S.selPath) === isr;
+      const t1 = label(isr.name + (isr.over_budget ? ' ⚠' : ''), { bold: true, h: fh(FS.isr), color: selIsr ? cssVar('--accent') : (isr.over_budget ? cssVar('--critical') : cssVar('--fg')) });
+      t1.position.set(px0 - 0.1 - t1.scale.x / 2, twoLines ? row.y + fh(FS.sub) * 0.65 : row.y, dz + 0.3); t1.userData = { isrRow: isr, title: `${isr.name}: ${ref.name} +${(isr.start_us / SYM).toFixed(2)} sym · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym budget' : 'no budget'} · computed ${(isr.computed_us / SYM).toFixed(2)} sym${isr.over_budget ? ' (OVER BUDGET)' : ''}${isr.period_us ? ' · every ' + fmt(isr.period_us) : ''} · click to focus the ISR` }; root.add(t1); pick3.push(t1);
       if (twoLines) {
-        const t2 = label(`${ref.name} +${(isr.start_us / SYM).toFixed(2)} · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym' : 'no budget'}${isr.period_us ? ' · /' + fmt(isr.period_us).replace(' ', '') : ''}`, { h: fh(FS.sub), color: mutedC });
+        const t2 = label(`${ref.name} +${(isr.start_us / SYM).toFixed(2)} · ${isr.length_us ? (isr.computed_us / SYM).toFixed(2) + ' / ' + (isr.length_us / SYM).toFixed(2) + ' sym' : (isr.computed_us / SYM).toFixed(2) + ' sym, no budget'}${isr.period_us ? ' · /' + fmt(isr.period_us).replace(' ', '') : ''}`, { h: fh(FS.sub), color: isr.over_budget ? cssVar('--critical') : mutedC });
         if (t2.scale.x > STRIP_L * k - 0.3) t2.scale.multiplyScalar((STRIP_L * k - 0.3) / t2.scale.x);
         t2.position.set(px0 - 0.1 - t2.scale.x / 2, row.y - fh(FS.isr) * 0.7, dz + 0.3); root.add(t2);
+      }
+      // budget gauge at the left edge of the label strip: track = budget, fill = computed time (red when over)
+      if (isr.length_us && !manyRows) {
+        const gw = 4 * k, gx = px0 - STRIP_L * k + 0.06 + gw / 2, ratio = Math.min(1.25, isr.computed_us / isr.length_us), gh = row.h - 0.06;
+        gaugeRecs.push({ x: gx, y: row.y, w: gw, h: gh, c: gridC, z: dz + 0.25, op: 0.9 });
+        gaugeRecs.push({ x: gx, y: row.y - gh / 2 + gh * Math.min(1, ratio) / 2, w: gw, h: gh * Math.min(1, ratio), c: isr.over_budget ? critC : coreC, z: dz + 0.26, op: 0.9 });
       }
       const span = Math.max(isr.computed_us, isr.length_us || 0);
       const insts = instancesOf(isr).filter(i => i.start + span >= r0 && i.start <= r1), shown = shownInst(isr), vis = visibleNodes(isr);
@@ -430,7 +465,7 @@ function build3D() {
         for (const rr of list) {
           const n = rr.n, ta = n.start_us + dt, tb = ta + n.total_us;
           if (tb < r0 || ta > r1 || boxBudget <= 0) continue;
-          const path = pfx + rr.key.slice(isr.name.length), f = fnOf(n.fid), bx = tx(Math.max(ta, r0)) + dx, w = Math.max(tx(Math.min(tb, r1)) - bx + dx, 2 * k), yc = rowY(row, n.depth);
+          const path = pfx + rr.key.slice(isr.name.length), f = fnOf(n.fid), bx = tx(Math.max(ta, r0)) + dx, w0 = Math.max(tx(Math.min(tb, r1)) - bx + dx, 2 * k), w = w0 > 4 * k ? w0 - seam : w0, yc = rowY(row, n.depth);
           const foc = S.block ? hl(n.fid) : inFocus(path, n.fid);
           const col = new THREE.Color(f ? modColor(f.module) : mutedC);
           recs.push({ n, isr, path, k: inst.k, x: bx, w, y: yc, z: dz + n.depth * dzStep, col, foc, root: rr.parent < 0, ext: n.external, rec: n.recursive, via: !!n.via_table, sel: S.selPath === path });
@@ -455,9 +490,14 @@ function build3D() {
   // --- instanced marks
   const mat = new THREE.Matrix4(), col = new THREE.Color();
   if (envRecs.length) {
-    const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), envRecs.length, { opacity: 0.09 });
+    const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), envRecs.length, { opacity: 0.13 });
     envRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; root.add(m); G.env = m;
+  }
+  if (gaugeRecs.length) {
+    const m = instanced(new THREE.PlaneGeometry(1, 1), gaugeRecs.length, { opacity: 0.9 });
+    gaugeRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
+    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; root.add(m);
   }
   G.recs = recs; G.evRecs = evRecs; G.touchRecs = touchRecs;
   if (recs.length) {
@@ -483,15 +523,17 @@ function build3D() {
   // --- labels (capped, widest first; forced ones always)
   labelCands.sort((a, b) => (b.force ? 1e12 : b.pri) - (a.force ? 1e12 : a.pri));
   let nl = 0;
+  const placedRows = new Map();                      // free-floating labels (deadline tags): one per spot, never written over each other
   for (const c of labelCands) {
     if (nl >= labelCap && !c.force) break;
     if (persp && c.dim && emphasis) continue;
     const lb = label(c.txt, { h: c.h, bold: c.bold, color: c.color, opacity: c.dim && emphasis ? 0.35 : 1 });
     if (c.maxW != null && lb.scale.x > c.maxW && !c.force) continue;
+    if (c.left) { const key = c.y.toFixed(3) + '|' + c.z.toFixed(2), arr = placedRows.get(key) || [], x0 = c.x - 0.04, x1 = c.x + lb.scale.x + 0.04; if (arr.some(([a, b]) => x0 < b && x1 > a)) continue; arr.push([x0, x1]); placedRows.set(key, arr); }
     lb.position.set(c.x + lb.scale.x / 2, c.y, c.z); root.add(lb); nl++;
   }
   const ax = label('time →', { color: mutedC, h: fh(FS.axis) }); ax.position.set(x1 - ax.scale.x / 2, yTop + 0.4, ZBACK); root.add(ax);
-  if (L.stacked && planes.length > 1) { const dg = label('cores ↘ (front = higher core)', { color: mutedC, h: fh(FS.axis) }); dg.position.set(x1 + L.maxDx - dg.scale.x / 2 + 0.3, ruler.yBot - RULER_GAP / 2, PLANE_DZ() * planes.length + 0.3); root.add(dg); }
+  if (L.stacked && planes.length > 1) { const dg = label('cores ↘ (front = higher core)', { color: mutedC, h: fh(FS.axis) }); dg.position.set(x1 + L.maxDx - dg.scale.x / 2 + 0.3, ruler.yBot - ruler.gap / 2, PLANE_DZ() * planes.length + 0.3); root.add(dg); }
   tm.labels = Math.round(performance.now() - t0);
   G.colors = { panelC, panel2C };
   recolor3D();
@@ -499,9 +541,9 @@ function build3D() {
   // canvas height follows the content in the orthographic views (capped; shift+wheel / drag scrolls rows)
   if (S.sceneH) { if (sceneEl.style.height !== S.sceneH + 'px') sceneEl.style.height = S.sceneH + 'px'; }
   else if (ortho()) {
-    const hPx = Math.round((ext.vTop - ext.vBot) / k) + 34, newH = Math.max(240, Math.min(Math.round(window.innerHeight * 0.46), hPx)) + 'px';
+    const hPx = Math.round((ext.vTop - ext.vBot) / k) + 34, newH = Math.max(240, Math.min(Math.round(window.innerHeight * SCENE_MAX_VH), hPx)) + 'px';
     if (sceneEl.style.height !== newH) sceneEl.style.height = newH;
-  } else { const ph = Math.round(window.innerHeight * 0.46) + 'px'; if (sceneEl.style.height !== ph) sceneEl.style.height = ph; }
+  } else { const ph = Math.round(window.innerHeight * SCENE_MAX_VH) + 'px'; if (sceneEl.style.height !== ph) sceneEl.style.height = ph; }
   tm.height = Math.round(performance.now() - t0);
   sizeCanvas();
   tm.size = Math.round(performance.now() - t0);
@@ -540,7 +582,8 @@ function renderLegend() {
     `<span><i style="background:var(--read)"></i>read / recv</span><span><i style="background:var(--write)"></i>write / send</span><span><i style="background:var(--critical)"></i>deadline miss</span>` +
     TI.filter(t => t.id !== 'nw' && !S.refHidden.has(t.id)).map(t => `<span style="color:${t.color || cat(TIX[t.id].idx + 2)}"><i class="dash"></i>${esc(t.name)} ${t.offset_us >= 0 ? '+' : ''}${(t.offset_us / SYM).toFixed(2)} sym</span>`).join('') +
     (S.showDeadlines ? `<span style="color:var(--critical)"><i class="dash"></i>HW block deadline (per ISR instance)</span>` : '') +
-    `<span style="opacity:.8">● on a box = register access · ◆ below = shared-memory / IPC / heap touch · rows inside an ISR = call depth · ▭ = ISR budget · #k = periodic instance · reference lines = timing.yaml references (NW ± offset), toggle them in the controls${st.lod ? ' · <b>LOD: subtrees only on the shown instance</b>' : ''}</span>`;
+    (SLOT_BANDS ? (CH.tdd_pattern ? `<span><i style="background:${chColor({ dir: 'ul' })};opacity:.35;border-radius:2px"></i>U slot · <i style="background:var(--warn);opacity:.45;border-radius:2px"></i>S slot (TDD ${esc(CH.tdd_pattern)}; D slots plain)</span>` : `<span><i style="background:var(--fg);opacity:.15;border-radius:2px"></i>every other slot tinted</span>`) : '') +
+    `<span style="opacity:.8">● on a box = register access · ◆ below = shared-memory / IPC / heap touch · rows inside an ISR = call depth · ▭ = ISR budget · ▮ left of the name = computed / budget (red = over) · #k = periodic instance · reference lines = timing.yaml references (NW ± offset), toggle them in the controls${st.lod ? ' · <b>LOD: subtrees only on the shown instance</b>' : ''}</span>`;
 }
 // overview bar (top overlay): whole window with the current range band; drag to set the range
 function renderOverview() {

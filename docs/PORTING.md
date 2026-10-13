@@ -61,13 +61,15 @@ profiles/<name>/
 | `inputs.build / sw_structure / timing / hw_structure / annotations` | 각 입력 파일 경로 | 같은 이름의 yaml |
 | `output.dir` | 출력 디렉터리 | `<profiles>/../output/<name>` |
 | `output.html`, `output.json` | 출력 파일 이름 | `profile.html`, `profile.json` |
-| `viewer.default_view` | `tilt`(코어 평면을 카드처럼 겹쳐 쌓음) / `aligned`(겹침 없이 나열) / `3d`(원근) | `tilt` |
+| `viewer.default_view` | `aligned`(모든 코어가 한 시간축, 기본) / `tilt`(코어 평면을 카드처럼 대각선으로 쌓음) / `3d`(원근) | `aligned` |
 | `viewer.default_slots` | 로드 시 보여줄 NW slot 수 (상단 Slots 컨트롤로 변경) | 5 |
-| `viewer.stack_overlap` | stacked 뷰에서 앞 평면이 뒤 평면을 덮는 비율 0~0.85 (슬라이더로 변경) | 0.5 |
+| `viewer.stack_overlap` | stacked 뷰에서 앞 평면이 뒤 평면을 덮는 비율 0~0.85 (슬라이더로 변경; 0 = 모든 행이 보임) | 0 |
+| `viewer.slot_bands` | TDD 패턴이 있으면 U / S 슬롯, 없으면 홀수 슬롯에 옅은 음영 | true |
+| `viewer.diagram.max_vh`, `.min_scale`, `.scene_max_vh` | SW/HW 구조 창은 내용에 맞춰 화면의 max_vh 까지 자라고, 그 뒤에는 min_scale 까지만 축소(나머지는 팬/줌); 타이밍 창은 scene_max_vh 까지 | 0.38, 0.7, 0.6 |
 | `viewer.expand_depth` | 로드 시 ISR 진입점 아래로 펼칠 콜그래프 레벨 (0 = 진입점만) | 1 |
 | `viewer.row_px` | 호출 깊이 한 행의 픽셀 높이 (Row scale 슬라이더로 배율 조절) | 12 |
 | `viewer.sw_structure.depth`, `viewer.hw_structure.depth` | 구조 다이어그램 중첩 깊이 | 3, 2 |
-| `viewer.sw_structure.columns`, `.open` | 최상위 열 수, 로드 시 펼칠 노드 id | 4, [] |
+| `viewer.sw_structure.leaf_px`, `.columns`, `.open` | 격자 열 폭(px; 열 수는 창 폭에서 자동), 열 수 상한, 로드 시 펼칠 노드 id | 196, 12, [] |
 | `viewer.max_boxes`, `viewer.max_labels` | 뷰어 LOD 한도 | 40000, 700 |
 | `viewer.max_instances` | ISR당 그릴 주기 인스턴스 상한 | 1500 |
 | `viewer.dsm_max_functions` | 이 함수 수를 넘으면 DSM을 모듈 접힘 상태로 시작 | 400 |

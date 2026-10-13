@@ -15,13 +15,19 @@ concern) and renders one self-contained HTML page with three stacked overlays an
   Structure tab: Structure101-style DSM (levelized, feedback in red) · LSM · tangles · layer-rule violations
 ```
 
-Every diagram pans (drag) and zooms (wheel); the three overlays are sized to share one screen and every
-window can be resized by dragging its bottom edge (the side column by dragging the splitter; double-click
-resets). Cores are checkboxes, ISRs a checkbox list (filter, all / none / "only this core"), and the
+Every diagram pans (drag) and zooms (wheel; double-click fits). The SW / HW structure boxes are packed into a column
+grid that follows the window width: a container spans as many columns as its content needs, siblings are
+skyline-packed so short boxes fill the space next to tall ones, and the window grows with the content (up to
+`viewer.diagram.max_vh` of the screen, then the diagram is scaled down to `min_scale` at most). The timing window
+grows with its rows up to `scene_max_vh`; every window can still be resized by dragging its bottom edge (the
+side column by dragging the splitter; double-click resets), and the call graph / Details windows scroll inside
+the side column. Cores are checkboxes, ISRs a checkbox list (filter, all / none / "only this core"), and the
 *Slots* control picks which NW slots are shown (default: 5 from slot 0, ◂ ▸ step, *all* = whole window).
-The *Stacked* view draws the core planes like a deck of cards — core 0 at the back, every next core in
-front and shifted down-right, the *Core overlap* slider sets how much a plane covers the one behind it
-(0 % = no overlap); the *3D* view stacks them in real depth, higher cores closer to the viewer, and moves with the
+The default *Aligned* view puts every core on one shared time axis (reference lines run through all planes,
+rows alternate a faint band, U / S slots are tinted when `channels.tdd_pattern` is set, ▮ left of every ISR name
+is its computed time against its budget, red = over); the *Stacked* view draws the core planes like a deck of
+cards — core 0 at the back, every next core in front and shifted down-right, the *Core overlap* slider sets how
+much a plane covers the one behind it (0 % = no overlap, the default); the *3D* view stacks them in real depth, higher cores closer to the viewer, and moves with the
 right mouse button, the *✥ pan* mode, the ◀ ▶ ▲ ▼ buttons or the arrow keys. The dashed verticals are the
 reference lines of `timing.yaml` (`references`: NW ± offset, one colour each, listed in the legend and switchable
 in the controls) and, in red, the HW block deadlines of `hw_structure.yaml` drawn per ISR instance. Clicking a SW block
@@ -37,6 +43,8 @@ diagrams. *◀ back* / *▶* (Alt+← / Alt+→) walk the selection history.
 *this function only* vs *include callees to leaves* decides whether the focus is the function or its whole
 call closure; *call graph level* sets how many levels unfold (every node can still be expanded / collapsed
 individually); *SW depth* / *HW depth* set how deep the structure diagrams nest.
+
+![overview, nothing selected](docs/img/nr_overview.png)
 
 ![overview, DL_PDSCH_ISR focused](docs/img/nr_overview_focus.png)
 
@@ -111,10 +119,11 @@ Time expressions: `"1.2 symbol"`, `"0.5 slot"`, `"-30 us"`, `"2 ms"`, `"1 subfra
 
 ### Viewer options (`profile.yaml: viewer`)
 
-`default_view` (tilt / aligned / 3d), `tilt_dx_px`, `theme`, `unit`, `row_px`, `label_margin_px`,
+`default_view` (aligned / tilt / 3d), `tilt_dx_px`, `theme`, `unit`, `row_px`, `label_margin_px`,
 `expand_depth`, `max_instances`, `max_boxes` / `max_labels` (level of detail), `legend`, `colors`,
-`channels.row_px`, `sw_structure` / `hw_structure` (`depth`, `columns`, `open`), `window_range`, `default_slots`
-(5), `stack_overlap` (0.5), `dsm_max_functions`. Deep links: `#sel-DL_PDSCH_ISR--range-0.9~1.3--view-3d`,
+`channels.row_px`, `slot_bands`, `sw_structure` / `hw_structure` (`depth`, `open`, `leaf_px` = column width,
+`columns` = cap on the auto grid), `diagram` (`max_vh` 0.38, `min_scale` 0.7, `scene_max_vh` 0.6), `window_range`,
+`default_slots` (5), `stack_overlap` (0), `dsm_max_functions`. Deep links: `#sel-DL_PDSCH_ISR--range-0.9~1.3--view-3d`,
 `#selonly-<function>`, `#level-4--swdepth-2`, `#isr-DL_PDSCH_ISR,DL_SYMBOL_ISR`, `#slots-2~3`, `#overlap-70`,
 `#structure`, `#selftest`.
 
