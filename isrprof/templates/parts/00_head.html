@@ -203,6 +203,8 @@ label.chk input { accent-color: var(--accent); margin: 0; }
 .dd-tools { display: flex; gap: 6px; margin-bottom: 6px; }
 .dd-tools input { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; background: var(--panel-2); }
 .dd .core-h { font-size: 11px; color: var(--muted); margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .04em; display: flex; gap: 6px; align-items: center; }
+.tog.pin { margin-left: auto; padding: 0 4px; font-size: 10px; line-height: 15px; opacity: .55; }
+.tog.pin[aria-pressed="true"] { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
 /* resizable windows: handle at the bottom edge of every panel body, splitter for the side column */
 .panel .body { position: relative; }
 .rz { height: 9px; margin: 1px 10px 3px; border-radius: 4px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; touch-action: none; }

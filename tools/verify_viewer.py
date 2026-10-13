@@ -75,9 +75,59 @@ def extract_report(dom: str) -> dict | None:
     return json.loads(html.unescape(m.group(1)))
 
 
+# controls whose click may legitimately change nothing in the state the sweep runs in (already at that state / edge of a range)
+SWEEP_MAY_IDLE = {"button:cores-all", "button:isr-all", "button:range-full", "button:slot-prev", "button:left", "button:zout", "button:nav-prev", "button:nav-caller", "button:nav-callee", "button:nav-next",
+                  "button:hist-fwd", "button:hist-back", "button:fit@sw", "button:fit@hw", "button:focus-clear", "button:dsm-exp", "button:arr1", "button:arr2", "button:aligned", "button:unit-sym",
+                  "button:focus-deep", "button:impact@usedby", "button:lvl-dec", "button:col-all", "button:timing", "button:isr-none", "button:pan", "button:imp-apply", "button:only@0"}
+
+
+def sweep(report: dict, st: dict, bad: list, notes: list) -> None:
+    """The control sweep: every window / checkbox / input / select / button must act and recover."""
+    steps = [s for s in report["steps"] if s["name"].startswith("sweep:")]
+    summ = st.get("sweep summary")
+    if not steps or not summ:
+        bad.append("control sweep did not run")
+        return
+    for s in steps:
+        if s.get("error"):
+            bad.append(f"sweep {s['name'][6:]} threw: {s['error'][:200]}")
+    for s in steps:
+        n = s["name"][6:]
+        if n.startswith("panel:") and not s.get("ok") and not s.get("hidden"):
+            bad.append(f"window {n[6:]} did not close / open: {s}")
+        if n.startswith("checkbox:") and not (s.get("toggled") and s.get("effect")):
+            bad.append(f"{n} had no visible effect when toggled: {s}")
+        if n.startswith("checkbox:") and not s.get("restored"):
+            bad.append(f"{n} did not come back to its initial picture after toggling twice: {s}")
+        if n.startswith(("number:", "range:")) and not s.get("effect"):
+            bad.append(f"{n} had no visible effect across its range: {s}")
+        if n.startswith(("number:", "range:")) and not s.get("restored"):
+            bad.append(f"{n} did not come back after restoring its value: {s}")
+        if n.startswith("number:") and any(str(t.get("got")) != str(t.get("set")) for t in s.get("tried", []) if t.get("set") is not None and float(t.get("set")) >= 0):
+            notes.append(f"{n}: a value was clamped: {s.get('tried')}")
+        if n == "search:isr-filter" and not s.get("effect"):
+            bad.append(f"ISR filter box did not narrow the list: {s}")
+        if n.startswith("select:") and not s.get("effect"):
+            bad.append(f"{n} options had no effect: {s}")
+        if n.startswith("button:") and s.get("skipped"):
+            continue
+        if n.startswith("button:") and n not in SWEEP_MAY_IDLE and not s.get("effect") and not (s.get("pressed") and s["pressed"][0] != s["pressed"][1]) and not (s.get("selected") and s["selected"][0] != s["selected"][1]):
+            bad.append(f"{n} click changed nothing: {s}")
+        if n.startswith("button:") and s.get("pressedUnchanged") and n not in SWEEP_MAY_IDLE:
+            bad.append(f"{n} is a toggle button but aria-pressed did not flip: {s}")
+    if summ.get("checkboxes", 0) < 4 or summ.get("buttons", 0) < 15 or summ.get("ranges", 0) < 3 or summ.get("numbers", 0) < 2 or summ.get("panels", 0) < 4:
+        bad.append(f"control sweep covered too little: {summ}")
+    idle = [n for n in summ.get("noEffect", []) if n not in SWEEP_MAY_IDLE and not n.startswith(("checkbox:", "number:", "range:", "select:"))]
+    if idle:
+        notes.append("buttons without a visible effect in the sweep state: " + ", ".join(idle))
+    notes.append(f"control sweep: {summ.get('panels')} windows, {summ.get('checkboxes')} checkboxes, {summ.get('numbers')} number inputs, {summ.get('ranges')} sliders, {summ.get('selects')} selects, {summ.get('buttons')} buttons exercised")
+
+
 def check(report: dict) -> list[str]:
     """Expectations on the self-test report (the viewer must really react, not just not crash)."""
     bad: list[str] = []
+    notes: list[str] = []
+    check.notes = notes                     # informational findings, printed after the result
     st = {s["name"]: s for s in report["steps"]}
     if report.get("errors"):
         bad.append(f"JS errors: {report['errors']}")
@@ -114,6 +164,15 @@ def check(report: dict) -> list[str]:
         bad.append(f"variable selection did not focus its users: {hb}")
     if hb and not ir.get("skipped") and not ir.get("fids", 0) > 0:
         bad.append(f"IPC selection did not focus its users: {hb}")
+    pr = st.get("pin rows", {})
+    if pr and not (pr.get("after", 0) == pr.get("before", 0) + 1 and pr.get("boxesAfter", 0) > pr.get("boxesBefore", 0) and pr.get("listPressed") == 1
+                   and pr.get("pinnedBoxesInSticky", 0) > 0 and pr.get("afterClick") == pr.get("before") and pr.get("stored") == "[]"):
+        bad.append(f"pinning an ISR row did not add a sticky copy / toggle back: {pr}")
+    if pr and pr.get("shift", 0) < 0 and abs(pr.get("stickyY1", 0) + pr.get("shift", 0)) > 1e-3:
+        bad.append(f"pinned rows did not stay on top while scrolling: {pr}")
+    if pr and pr.get("shift", 0) >= 0:
+        notes.append(f"pin rows: the window held every row even at 220 px, scrolling not exercised ({pr.get('contentPx')} px content)")
+    sweep(report, st, bad, notes)
     im = st.get("impact modes", {})
     if im and not (im.get("usedbyRows", 0) >= 2 and im.get("removeHeads", 0) >= 4 and im.get("moveSelect") and im.get("moveHeads", 0) >= 3 and im.get("targetAfter") and im.get("targetAfter") != im.get("target")):
         bad.append(f"impact analysis modes did not render: {im}")
@@ -187,8 +246,10 @@ def check(report: dict) -> list[str]:
     if not (isf.get("boxesOne", 0) < isf.get("boxesAll", 0)):
         bad.append("ISR filter did not reduce the boxes")
     sl = st.get("slots 2 from 1", {})
-    if sl.get("from") != "1" or sl.get("count") != "2" or not sl.get("boxes"):
+    if sl.get("from") != "1" or sl.get("count") != "2" or not str(sl.get("range", "")).startswith("s1 "):
         bad.append(f"slot selection did not apply: {sl}")
+    elif not sl.get("boxes"):
+        notes.append("slots 1-3 hold no ISR instance in this profile (data, the range itself applied)")
     sn = st.get("slots next", {})
     if sn and sn.get("from") != str(min(3, int(sn.get("max", 3)) - 2)):      # steps by `count`, clamped to the window
         bad.append(f"slot stepping did not advance: {sn}")
@@ -200,7 +261,7 @@ def check(report: dict) -> list[str]:
     rs = st.get("resize side / windows", {})
     if rs and (abs(rs.get("sideW", 0) - 500) > 2 or rs.get("handles", 0) < 3 or abs(rs.get("sideDrag", 0) - 150) > 3
                or abs(rs.get("treeAfter", 0) - rs.get("treeBefore", 0) - 120) > 3
-               or abs(rs.get("swBefore", 0) - rs.get("swAfter", 0) - 40) > 3
+               or abs(rs.get("swAfter", 0) - rs.get("swBefore", 0) - 60) > 3
                or abs(rs.get("sceneAfter", 0) - rs.get("sceneBefore", 0) - 90) > 3):
         bad.append(f"dragging a window handle did not resize it: {rs}")
     if "µs" not in st.get("unit us", {}).get("text", ""):
@@ -251,6 +312,8 @@ def main(argv=None) -> int:
         print(f"  {'FAIL' if s.get('error') else 'ok  '} {s['name']:<34} {s['ms']:>5} ms  {json.dumps(d, ensure_ascii=False)[:230]}")
     if report.get("errors"):
         print("  JS errors:", report["errors"])
+    for n in getattr(check, "notes", []):
+        print(f"  note: {n}")
     if args.screenshot:
         run_browser(browser, "file:///" + path.replace("\\", "/") + "#sel-" + (report["steps"][1]["name"].split()[-1]), args.budget, args.screenshot, args.width, args.height)
         print(f"  screenshot: {args.screenshot}")

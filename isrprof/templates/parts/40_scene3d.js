@@ -65,14 +65,9 @@ function computeLayout(k, refRows) {
   y = ruler.yBot - rulerGap;
   const planes = [];
   const stacked = S.view === 'tilt', persp = S.view === 'persp', ov = stacked ? S.overlap : 0;
-  let idx = 0, prevH = 0, yStart = y, yMin = y;
-  for (const c of CORES) {
-    if (!S.cores.has(c.id)) continue;
-    const isrs = visibleIsrs().filter(i => i.core === c.id).sort((a, b) => (TIX[a.timing].priority - TIX[b.timing].priority) || (a.abs_start_us - b.abs_start_us));
-    // stacked: this plane starts inside the previous one (covering its lower part), like a deck of cards;
-    // 3D: every plane starts at the same place and the cores only differ in depth
-    if (idx > 0) y = persp ? yStart : y + ov * prevH;
-    const pl = { core: c, k: idx, isrs, rows: [], yTop: y, dx: 0, dz: 0 };
+  const byPrio = (a, b) => (TIX[a.timing].priority - TIX[b.timing].priority) || (a.abs_start_us - b.abs_start_us);
+  const addPlane = (core, isrs, pinned) => {
+    const pl = { core, k: planes.filter(p => !p.pinned).length, isrs, rows: [], yTop: y, dx: 0, dz: 0, pinned };
     y -= PLANE_HDR;
     for (const isr of isrs) {
       const vis = visibleNodes(isr), md = vis.length ? Math.max(...vis.map(r => r.depth)) : 0;
@@ -82,15 +77,32 @@ function computeLayout(k, refRows) {
     }
     if (!isrs.length) y -= LANE_PAD * 2;
     pl.yBot = y;
+    planes.push(pl);
+    return pl;
+  };
+  // pinned rows: one plane holding the pinned ISRs of every visible core; it sits under the ruler and, in the
+  // orthographic views, stays on screen while the core planes scroll underneath (see the sticky group)
+  const pinnedIsrs = visibleIsrs().filter(i => S.pinned.has(i.name)).sort((a, b) => (a.core - b.core) || byPrio(a, b));
+  let stickyBot = y;
+  if (pinnedIsrs.length) { const pp = addPlane({ id: -1, name: 'pinned rows', clock_mhz: 0, color: cssVar('--accent') }, pinnedIsrs, true); stickyBot = pp.yBot; y -= PLANE_GAP; }
+  let prevH = 0, yStart = y, yMin = y, first = true;
+  for (const c of CORES) {
+    if (!S.cores.has(c.id)) continue;
+    const isrs = visibleIsrs().filter(i => i.core === c.id).sort(byPrio);
+    // stacked: this plane starts inside the previous one (covering its lower part), like a deck of cards;
+    // 3D: every plane starts at the same place and the cores only differ in depth
+    if (!first) y = persp ? yStart : y + ov * prevH;
+    first = false;
+    const pl = addPlane(c, isrs, false);
     prevH = pl.yTop - pl.yBot;
     y -= PLANE_GAP;
     yMin = Math.min(yMin, y);
-    planes.push(pl); idx++;
   }
   if (persp) y = yMin;
   const dxw = stacked ? TILT_DX_PX * k : 0;
-  planes.forEach(p => { p.dx = dxw * p.k; p.dz = p.k * PLANE_DZ(); });      // core 0 at the back, every next core closer to the viewer
-  return { ruler, planes, height: -y, maxDx: dxw * Math.max(0, planes.length - 1), stacked };
+  planes.forEach(p => { if (p.pinned) { p.dx = 0; p.dz = 0; return; } p.dx = dxw * p.k; p.dz = p.k * PLANE_DZ(); });      // core 0 at the back, every next core closer to the viewer
+  const nCore = planes.filter(p => !p.pinned).length;
+  return { ruler, planes, height: -y, maxDx: dxw * Math.max(0, nCore - 1), stacked, stickyBot, pinnedRows: pinnedIsrs.length };
 }
 const rowY = (row, depth) => row.yTop - LANE_PAD - LEVEL_H * depth - LEVEL_H / 2;
 
@@ -184,7 +196,9 @@ function updateCamera() {
     const cx = ext.x0 - STRIP_L * k + W / 2, topV = ext.vTop + ext.yShift;
     camO.left = -W / 2; camO.right = W / 2; camO.top = topV; camO.bottom = topV - H;
     camO.up.set(0, 1, 0); camO.position.set(cx, 0, 300); camO.lookAt(cx, 0, 0); camO.updateProjectionMatrix();
+    if (G.sticky) G.sticky.position.y = -ext.yShift;          // ruler + pinned rows stay at the top while the planes scroll
   } else {
+    if (G.sticky) G.sticky.position.y = 0;
     camera = camP; camP.aspect = Wc / Hc; camP.updateProjectionMatrix();
     const sp = Math.sin(cam.phi);
     camP.position.set(cam.target.x + cam.radius * sp * Math.sin(cam.theta), cam.target.y + cam.radius * Math.cos(cam.phi), cam.target.z + cam.radius * sp * Math.cos(cam.theta));
@@ -306,7 +320,7 @@ function instanced(geo, n, opts) {
 function build3D() {
   if (!have3D) { build2D(); return; }
   const t0 = performance.now();
-  clearGroup(root); pick3 = []; hovered = null; root.position.x = 0;
+  clearGroup(root); pick3 = []; hovered = null; root.position.x = 0; G.sticky = null; G.sets = [];
   const Wc = Math.max(sceneEl.clientWidth, 400), plotPx = Math.max(Wc - STRIP_L - STRIP_R, 200);
   ext.k = LEVEL_H / (ROW_PX * S.tscale);
   const k = ext.k, fh = px => px * k;                 // font height in world units for a pixel size
@@ -337,6 +351,16 @@ function build3D() {
   const panelC = new THREE.Color(cssVar('--panel')), panel2C = new THREE.Color(cssVar('--panel-2')), lineC = new THREE.Color(cssVar('--line-strong')), gridC = new THREE.Color(cssVar('--line')), fg = new THREE.Color(cssVar('--fg'));
   const critC = new THREE.Color(cssVar('--critical')), readC = new THREE.Color(cssVar('--read')), writeC = new THREE.Color(cssVar('--write')), accentC = new THREE.Color(cssVar('--accent')), mutedC = cssVar('--muted'), seriousC = new THREE.Color(cssVar('--serious'));
   const persp = S.view === 'persp', dzStep = persp ? 0.35 : 0.02;
+  // sticky group: the ruler (slot / symbol labels, channel band, reference labels) and the pinned rows; in the
+  // orthographic views it is moved with the vertical scroll (updateCamera) and sits in front of the planes on an
+  // opaque plate, so these stay readable however far the core planes are scrolled
+  const sticky = new THREE.Group(); sticky.position.z = ortho() ? 8 : 0; root.add(sticky); G.sticky = sticky;
+  {
+    const sTop = ext.vTop, sBot = L.stickyBot, sw = x1 - x0 + STRIP_L * k + L.maxDx + STRIP_R * k;
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(sw, sTop - sBot), new THREE.MeshBasicMaterial({ color: panelC, transparent: true, opacity: 1, depthWrite: true }));
+    plate.position.set(x0 - STRIP_L * k + sw / 2, (sTop + sBot) / 2, ZBACK - 0.06); plate.renderOrder = 10; plate.visible = ortho(); sticky.add(plate);
+    if (L.pinnedRows) { const ln = segs([x0 - STRIP_L * k, sBot - 0.02, 0.4, x1 + L.maxDx, sBot - 0.02, 0.4], accentC, { opacity: 0.8 }); if (ln) sticky.add(ln); }
+  }
   const pxPerSym = SX / k, symLines = pxPerSym >= 4, labelMinW = 40 * k;
   // symbol numbers: every symbol when they fit, else every 2nd, else only the slot middle (symbol 7); the slot label wins
   const symEvery = pxPerSym >= 30 ? 1 : pxPerSym >= 15 ? 2 : pxPerSym >= 5 ? Math.max(2, Math.floor(SPS / 2)) : 0;
@@ -353,14 +377,14 @@ function build3D() {
       const txt = isSlot ? `s${i / SPS}${i === 0 ? ' (NW)' : ''}${isSlot && CH.tdd_pattern ? ' ' + slotType(i / SPS) : ''}` : `${symIdx}`;
       const lb = label(txt, { color: isSlot ? cssVar('--fg') : mutedC, h: fh(isSlot ? FS.slot : FS.sym), bold: isSlot });
       if (!isSlot && lb.scale.x > pxPerSym * k * symEvery * 0.9) continue;
-      lb.position.set(x + lb.scale.x / 2 + 0.03, ruler.yTop + 0.14, ZBACK); root.add(lb);
+      lb.position.set(x + lb.scale.x / 2 + 0.03, ruler.yTop + 0.14, ZBACK); sticky.add(lb);
     }
   }
   const chRecs = [];
   ruler.rows.forEach((row, ri) => {
     const yc = ruler.chTop - ri * ruler.chH - ruler.chH / 2;
     const lb = label(row.name, { h: Math.min(fh(FS.ch), ruler.chH * 0.8), color: chColor(row.items[0]), bold: true });
-    lb.position.set(x0 - 0.1 - lb.scale.x / 2, yc, 0.3); root.add(lb);
+    lb.position.set(x0 - 0.1 - lb.scale.x / 2, yc, 0.3); sticky.add(lb);
     gridWeak.push(x0, yc - ruler.chH / 2, ZBACK, x1, yc - ruler.chH / 2, ZBACK);
     for (let s = slotA - 1; s <= slotB; s++) row.items.forEach(c => {
       if (!channelActive(c, s)) return;
@@ -373,28 +397,30 @@ function build3D() {
     const m = instanced(new THREE.BoxGeometry(1, 1, 0.12), chRecs.length, { opacity: 0.85 });
     const mat = new THREE.Matrix4(), col = new THREE.Color();
     chRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x + r.w / 2, r.y, ZBACK + 0.05); m.setMatrixAt(i, mat); col.set(chColor(r.c)); m.setColorAt(i, col); });
-    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; m.userData = { kind: 'ch' }; root.add(m); pick3.push(m); G.ch = m; G.chRecs = chRecs;
-    chRecs.forEach(r => { if (r.w > labelMinW * 1.4 && pxPerSym >= 10) { const lb = label(r.c.name || r.c.id, { h: Math.min(fh(FS.ch), ruler.chH * 0.7), color: '#ffffff' }); if (lb.scale.x < r.w - 0.02) { lb.position.set(r.x + 0.02 + lb.scale.x / 2, r.y, ZBACK + 0.2); root.add(lb); } } });
+    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; m.userData = { kind: 'ch' }; sticky.add(m); pick3.push(m); G.ch = m; G.chRecs = chRecs;
+    chRecs.forEach(r => { if (r.w > labelMinW * 1.4 && pxPerSym >= 10) { const lb = label(r.c.name || r.c.id, { h: Math.min(fh(FS.ch), ruler.chH * 0.7), color: '#ffffff' }); if (lb.scale.x < r.w - 0.02) { lb.position.set(r.x + 0.02 + lb.scale.x / 2, r.y, ZBACK + 0.2); sticky.add(lb); } } });
   }
   // reference lines on the NW ruler: from the slot-label row through the channel band to the first core plane
   // (strong = used by a visible ISR or carrying HW deadlines; the others stay faint and end at the first plane),
   // labelled once (name + offset vs NW) at their first occurrence in collision-free rows under the channel band
   {
     const continuous = S.view === 'aligned';     // no per-plane shift: one unbroken line down to the last plane
-    const refTop = ruler.yTop + 0.3, firstTop = !planes.length ? ruler.yBot - ruler.gap : planes[0].yTop + 0.02;
+    const corePlanes = planes.filter(p => !p.pinned);
+    const refTop = ruler.yTop + 0.3, stickyBot = L.stickyBot, firstTop = !corePlanes.length ? stickyBot : corePlanes[0].yTop + 0.02;
     refIds.forEach(t => {
-      const strong = strongOf(t), refBot = strong && continuous && planes.length ? planes[planes.length - 1].yBot : firstTop, pts = [];
-      for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + t.offset_us); if (x < -1e-6 || x > x1 + 1e-6) continue; pts.push(x, refBot, ZBACK + 0.01, x, refTop, ZBACK + 0.01); }
-      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: strong ? 0.55 : 0.16 }); if (l) root.add(l);
+      const strong = strongOf(t), c = new THREE.Color(refColor(t)), pts = [], pts2 = [];
+      for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + t.offset_us); if (x < -1e-6 || x > x1 + 1e-6) continue; pts.push(x, stickyBot, ZBACK + 0.01, x, refTop, ZBACK + 0.01); if (strong && continuous && corePlanes.length) pts2.push(x, corePlanes[corePlanes.length - 1].yBot, ZBACK + 0.01, x, firstTop, ZBACK + 0.01); }
+      const l = segs(pts, c, { dashed: true, dash: 0.05, gap: 0.045, opacity: strong ? 0.55 : 0.16 }); if (l) sticky.add(l);     // ruler part (sticky)
+      const l2 = segs(pts2, c, { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.55 }); if (l2) root.add(l2);                    // through the core planes (scrolls)
     });
     refLabels.forEach(g => {
       const lb = label(g.txt, { h: fh(FS.ref), color: refColor(g.t) });
-      lb.position.set(tx(g.px / pxPerSymEst * SYM + r0) + lb.scale.x / 2 + 0.02, ruler.yBot - 5 * k - g.row * fh(FS.ref) * 1.35 - fh(FS.ref) * 0.65, 0.3); root.add(lb);
+      lb.position.set(tx(g.px / pxPerSymEst * SYM + r0) + lb.scale.x / 2 + 0.02, ruler.yBot - 5 * k - g.row * fh(FS.ref) * 1.35 - fh(FS.ref) * 0.65, 0.3); sticky.add(lb);
     });
   }
 
   // --- planes: one per core
-  const recs = [], evRecs = [], touchRecs = [], envRecs = [], gaugeRecs = [], dlPts = [], labelCands = [];
+  const recs = [], evRecs = [], touchRecs = [], envRecs = [], gaugeRecs = [], dlPts = [], dlPtsS = [], labelCands = [];
   const seam = ortho() ? 1 * k : 0;                  // 1 px gap between adjacent boxes so neighbours of the same colour stay distinguishable
   let boxBudget = MAX_BOXES, lod = false;
   // LOD estimate: boxes if every instance drew its visible subtree
@@ -402,55 +428,61 @@ function build3D() {
   if (est > MAX_BOXES) lod = true;
   const nRows = planes.reduce((a, p) => a + p.rows.length, 0), manyRows = nRows > 150, labelCap = manyRows ? Math.min(MAX_LABELS, 300) : MAX_LABELS;
   for (const pl of planes) {
-    const dx = pl.dx, dz = pl.dz, cC = new THREE.Color(coreColor(pl.core.id));
+    const grp = pl.pinned ? sticky : root, g = pl.pinned ? 1 : 0, plColor = pl.core.color || coreColor(pl.core.id);
+    const dx = pl.dx, dz = pl.dz, cC = new THREE.Color(plColor);
     const px0 = x0 + dx, px1 = x1 + dx;
     // plane plate + header
-    if (L.stacked || persp) {       // opaque backing so a plane in front really covers the one behind it
+    if ((L.stacked || persp) && !pl.pinned) {       // opaque backing so a plane in front really covers the one behind it
       const back = new THREE.Mesh(new THREE.PlaneGeometry(px1 - px0 + STRIP_L * k, pl.yTop - pl.yBot), new THREE.MeshBasicMaterial({ color: panelC }));
-      back.position.set((px0 + px1) / 2 - STRIP_L * k / 2, (pl.yTop + pl.yBot) / 2, dz + ZBACK - 0.03); root.add(back);
-      const rim = new THREE.LineSegments(new THREE.EdgesGeometry(back.geometry), new THREE.LineBasicMaterial({ color: lineC, transparent: true, opacity: 0.9 })); rim.position.copy(back.position); rim.position.z += 0.005; root.add(rim);
+      back.position.set((px0 + px1) / 2 - STRIP_L * k / 2, (pl.yTop + pl.yBot) / 2, dz + ZBACK - 0.03); grp.add(back);
+      const rim = new THREE.LineSegments(new THREE.EdgesGeometry(back.geometry), new THREE.LineBasicMaterial({ color: lineC, transparent: true, opacity: 0.9 })); rim.position.copy(back.position); rim.position.z += 0.005; grp.add(rim);
     }
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(px1 - px0 + STRIP_L * k, pl.yTop - pl.yBot), new THREE.MeshBasicMaterial({ color: cC, transparent: true, opacity: 0.07, depthWrite: false }));
-    plate.position.set((px0 + px1) / 2 - STRIP_L * k / 2, (pl.yTop + pl.yBot) / 2, dz + ZBACK - 0.02); root.add(plate);
-    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.05, pl.yTop - pl.yBot), new THREE.MeshBasicMaterial({ color: cC })); edge.position.set(px0 - STRIP_L * k, (pl.yTop + pl.yBot) / 2, dz + 0.1); root.add(edge);
-    const hdr = label(`${pl.core.name} · ${pl.core.clock_mhz} MHz`, { bold: true, h: fh(FS.plane), color: coreColor(pl.core.id) }); hdr.position.set(px0 - STRIP_L * k + 0.1 + hdr.scale.x / 2, pl.yTop - PLANE_HDR / 2, dz + 0.3); hdr.userData = { core: pl.core.id, title: pl.core.description || pl.core.name }; root.add(hdr); pick3.push(hdr);
+    plate.position.set((px0 + px1) / 2 - STRIP_L * k / 2, (pl.yTop + pl.yBot) / 2, dz + ZBACK - 0.02); grp.add(plate);
+    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.05, pl.yTop - pl.yBot), new THREE.MeshBasicMaterial({ color: cC })); edge.position.set(px0 - STRIP_L * k, (pl.yTop + pl.yBot) / 2, dz + 0.1); grp.add(edge);
+    const hdr = label(pl.pinned ? `📌 ${pl.core.name} (${pl.rows.length}) · stay on top while scrolling` : `${pl.core.name} · ${pl.core.clock_mhz} MHz`, { bold: true, h: fh(FS.plane), color: plColor }); hdr.position.set(px0 - STRIP_L * k + 0.1 + hdr.scale.x / 2, pl.yTop - PLANE_HDR / 2, dz + 0.3); hdr.userData = { core: pl.core.id, title: pl.pinned ? 'pinned ISR rows: ⚐ / 📌 on a row toggles it, also in the ISR list of the controls' : (pl.core.description || pl.core.name) }; grp.add(hdr); pick3.push(hdr);
     // grid per plane
     const gS = [], gW = [], pSlotXs = [];
     for (let i = Math.ceil(r0 / SYM - 1e-9); i <= Math.floor(r1 / SYM + 1e-9); i++) {
       const isSlot = ((i % SPS) + SPS) % SPS === 0; if (!isSlot && !symLines) continue;
       const x = tx(i * SYM) + dx; if (isSlot) pSlotXs.push(x); else gW.push(x, pl.yBot, dz + ZBACK, x, pl.yTop, dz + ZBACK);
     }
-    { const sb = bars(pSlotXs, pl.yBot, pl.yTop, dz + ZBACK + 0.005, fg, 0.45, 2, k); if (sb) root.add(sb); const bd = slotBands(tx, x0, x1, pl.yBot, pl.yTop, dz + ZBACK - 0.01, fg, slotA, slotB, dx); if (bd) root.add(bd); }
-    const gw = segs(gW, gridC, { opacity: 0.18 }); if (gw) root.add(gw);
+    { const sb = bars(pSlotXs, pl.yBot, pl.yTop, dz + ZBACK + 0.005, fg, 0.45, 2, k); if (sb) grp.add(sb); const bd = slotBands(tx, x0, x1, pl.yBot, pl.yTop, dz + ZBACK - 0.01, fg, slotA, slotB, dx); if (bd) grp.add(bd); }
+    const gw = segs(gW, gridC, { opacity: 0.18 }); if (gw) grp.add(gw);
     // reference lines (dashed) repeated per slot - only the ones this plane's ISRs are placed on (the ruler on
     // top shows every line), so a plane carries just the lines that explain its rows
     const used = new Set(pl.isrs.map(i => i.timing));
     if (S.view !== 'aligned') refIds.filter(t => used.has(t.id)).forEach(t => {        // per plane (planes are shifted / in depth): through the plane and the gap under it, so the line never breaks
-      const yEnd = pl.k < planes.length - 1 ? Math.min(pl.yBot, planes[pl.k + 1].yTop) - 0.02 : pl.yBot;
+      const nxt = planes[planes.indexOf(pl) + 1], yEnd = nxt && !pl.pinned ? Math.min(pl.yBot, nxt.yTop) - 0.02 : pl.yBot;
       const pts = []; for (let s = slotA - 1; s <= slotB; s++) { const x = tx(s * SLOT + t.offset_us); if (x < -1e-6 || x > x1 + 1e-6) continue; pts.push(x + dx, yEnd, dz + ZBACK + 0.01, x + dx, pl.yTop, dz + ZBACK + 0.01); }
-      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.5 }); if (l) root.add(l);
+      const l = segs(pts, new THREE.Color(refColor(t)), { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.5 }); if (l) grp.add(l);
     });
     // alternating row bands over the plane (label strip included) so a row can be followed across the slots
     { const bx = [], bw = [], by = [], bh = []; pl.rows.forEach((row, ri) => { if (ri & 1) { bx.push((px0 + px1) / 2 - STRIP_L * k / 2); bw.push(px1 - px0 + STRIP_L * k); by.push((row.yTop + row.yBot) / 2); bh.push(row.yTop - row.yBot); } });
-      if (bx.length) { const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: fg, transparent: true, opacity: 0.035, depthWrite: false }), bx.length); const mt = new THREE.Matrix4(); bx.forEach((x, i) => { mt.makeScale(bw[i], bh[i], 1); mt.setPosition(x, by[i], dz + ZBACK - 0.015); m.setMatrixAt(i, mt); }); m.instanceMatrix.needsUpdate = true; m.frustumCulled = false; root.add(m); } }
+      if (bx.length) { const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: fg, transparent: true, opacity: 0.035, depthWrite: false }), bx.length); const mt = new THREE.Matrix4(); bx.forEach((x, i) => { mt.makeScale(bw[i], bh[i], 1); mt.setPosition(x, by[i], dz + ZBACK - 0.015); m.setMatrixAt(i, mt); }); m.instanceMatrix.needsUpdate = true; m.frustumCulled = false; grp.add(m); } }
     for (const row of pl.rows) {
       const isr = row.isr, ref = TIX[isr.timing], coreC = new THREE.Color(coreColor(isr.core));
       gW.length = 0;
-      root.add(segs([px0 - STRIP_L * k, row.yBot, dz + ZBACK, px1, row.yBot, dz + ZBACK], gridC, { opacity: 0.45 }));
+      grp.add(segs([px0 - STRIP_L * k, row.yBot, dz + ZBACK, px1, row.yBot, dz + ZBACK], gridC, { opacity: 0.45 }));
       const twoLines = row.h >= fh(FS.isr + FS.sub) * 1.45 && !manyRows;
       const selIsr = S.selPath && isrOfPath(S.selPath) === isr;
-      const t1 = label(isr.name + (isr.over_budget ? ' ⚠' : ''), { bold: true, h: fh(FS.isr), color: selIsr ? cssVar('--accent') : (isr.over_budget ? cssVar('--critical') : cssVar('--fg')) });
-      t1.position.set(px0 - 0.1 - t1.scale.x / 2, twoLines ? row.y + fh(FS.sub) * 0.65 : row.y, dz + 0.3); t1.userData = { isrRow: isr, title: `${isr.name}: ${ref.name} +${(isr.start_us / SYM).toFixed(2)} sym · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym budget' : 'no budget'} · computed ${(isr.computed_us / SYM).toFixed(2)} sym${isr.over_budget ? ' (OVER BUDGET)' : ''}${isr.period_us ? ' · every ' + fmt(isr.period_us) : ''} · click to focus the ISR` }; root.add(t1); pick3.push(t1);
+      const t1 = label(isr.name + (isr.over_budget ? ' ⚠' : '') + (pl.pinned ? ' · ' + (CORES[COREIDX[isr.core]] || { name: 'core ' + isr.core }).name : ''), { bold: true, h: fh(FS.isr), color: selIsr ? cssVar('--accent') : (isr.over_budget ? cssVar('--critical') : cssVar('--fg')) });
+      t1.position.set(px0 - 0.1 - t1.scale.x / 2, twoLines ? row.y + fh(FS.sub) * 0.65 : row.y, dz + 0.3); t1.userData = { isrRow: isr, title: `${isr.name}: ${ref.name} +${(isr.start_us / SYM).toFixed(2)} sym · ${isr.length_us ? (isr.length_us / SYM).toFixed(2) + ' sym budget' : 'no budget'} · computed ${(isr.computed_us / SYM).toFixed(2)} sym${isr.over_budget ? ' (OVER BUDGET)' : ''}${isr.period_us ? ' · every ' + fmt(isr.period_us) : ''} · click to focus the ISR` }; grp.add(t1); pick3.push(t1);
       if (twoLines) {
         const t2 = label(`${ref.name} +${(isr.start_us / SYM).toFixed(2)} · ${isr.length_us ? (isr.computed_us / SYM).toFixed(2) + ' / ' + (isr.length_us / SYM).toFixed(2) + ' sym' : (isr.computed_us / SYM).toFixed(2) + ' sym, no budget'}${isr.period_us ? ' · /' + fmt(isr.period_us).replace(' ', '') : ''}`, { h: fh(FS.sub), color: isr.over_budget ? cssVar('--critical') : mutedC });
         if (t2.scale.x > STRIP_L * k - 0.3) t2.scale.multiplyScalar((STRIP_L * k - 0.3) / t2.scale.x);
-        t2.position.set(px0 - 0.1 - t2.scale.x / 2, row.y - fh(FS.isr) * 0.7, dz + 0.3); root.add(t2);
+        t2.position.set(px0 - 0.1 - t2.scale.x / 2, row.y - fh(FS.isr) * 0.7, dz + 0.3); grp.add(t2);
       }
       // budget gauge at the left edge of the label strip: track = budget, fill = computed time (red when over)
       if (isr.length_us && !manyRows) {
         const gw = 4 * k, gx = px0 - STRIP_L * k + 0.06 + gw / 2, ratio = Math.min(1.25, isr.computed_us / isr.length_us), gh = row.h - 0.06;
-        gaugeRecs.push({ x: gx, y: row.y, w: gw, h: gh, c: gridC, z: dz + 0.25, op: 0.9 });
-        gaugeRecs.push({ x: gx, y: row.y - gh / 2 + gh * Math.min(1, ratio) / 2, w: gw, h: gh * Math.min(1, ratio), c: isr.over_budget ? critC : coreC, z: dz + 0.26, op: 0.9 });
+        gaugeRecs.push({ x: gx, y: row.y, w: gw, h: gh, c: gridC, z: dz + 0.25, op: 0.9, g });
+        gaugeRecs.push({ x: gx, y: row.y - gh / 2 + gh * Math.min(1, ratio) / 2, w: gw, h: gh * Math.min(1, ratio), c: isr.over_budget ? critC : coreC, z: dz + 0.26, op: 0.9, g });
+      }
+      // pin glyph next to the gauge: click pins / unpins the row (pinned rows are repeated at the top and stay there while scrolling)
+      if (!manyRows) {
+        const pinned = S.pinned.has(isr.name), pg = label(pinned ? '📌' : '⚐', { h: fh(FS.sub + 1), color: pinned ? cssVar('--accent') : mutedC });
+        pg.position.set(px0 - STRIP_L * k + 0.06 + 6 * k + pg.scale.x / 2, row.y, dz + 0.3); pg.userData = { pinIsr: isr.name, title: `${pinned ? 'unpin' : 'pin'} ${isr.name} (pinned rows stay at the top while scrolling)` }; grp.add(pg); pick3.push(pg);
       }
       const span = Math.max(isr.computed_us, isr.length_us || 0);
       const insts = instancesOf(isr).filter(i => i.start + span >= r0 && i.start <= r1), shown = shownInst(isr), vis = visibleNodes(isr);
@@ -458,9 +490,9 @@ function build3D() {
         const dt = inst.k * (isr.period_us || 0), base = inst.start, sub = showSub(isr, inst.k) && (!lod || inst.k === shown.k), pfx = isr.name + '#' + inst.k;
         if (isr.length_us && base + isr.length_us >= r0 && base <= r1) {
           const ea = Math.max(base, r0), eb = Math.min(base + isr.length_us, r1), w = Math.max(tx(eb) - tx(ea), 0.02);
-          envRecs.push({ x: tx(ea) + dx, w, y: row.y, h: row.h - 0.04, z: dz - 0.15, c: isr.over_budget ? critC : coreC });
+          envRecs.push({ x: tx(ea) + dx, w, y: row.y, h: row.h - 0.04, z: dz - 0.15, c: isr.over_budget ? critC : coreC, g });
         }
-        if (sub && S.showDeadlines) instDeadlines(isr, base).forEach(dl => { if (dl.t < r0 || dl.t > r1) return; const x = tx(dl.t) + dx; dlPts.push(x, row.yBot + 0.02, dz + 0.25, x, row.yTop - 0.02, dz + 0.25); if (inst.k === shown.k && !manyRows && (!REL || REL.blocks.has(dl.block))) { labelCands.push({ pri: 1e9, txt: `${dl.block} ≤${(dl.d.at_us / SYM).toFixed(1)}`, x: x + 0.02, y: row.yTop - 0.09, z: dz + 0.3, color: cssVar('--critical'), h: fh(FS.dl), left: true }); } });
+        if (sub && S.showDeadlines) instDeadlines(isr, base).forEach(dl => { if (dl.t < r0 || dl.t > r1) return; const x = tx(dl.t) + dx; (g ? dlPtsS : dlPts).push(x, row.yBot + 0.02, dz + 0.25, x, row.yTop - 0.02, dz + 0.25); if (inst.k === shown.k && !manyRows && (!REL || REL.blocks.has(dl.block))) { labelCands.push({ pri: 1e9, txt: `${dl.block} ≤${(dl.d.at_us / SYM).toFixed(1)}`, x: x + 0.02, y: row.yTop - 0.09, z: dz + 0.3, color: cssVar('--critical'), h: fh(FS.dl), left: true, g }); } });
         const list = sub ? vis : [vis[0]];
         for (const rr of list) {
           const n = rr.n, ta = n.start_us + dt, tb = ta + n.total_us;
@@ -468,57 +500,65 @@ function build3D() {
           const path = pfx + rr.key.slice(isr.name.length), f = fnOf(n.fid), bx = tx(Math.max(ta, r0)) + dx, w0 = Math.max(tx(Math.min(tb, r1)) - bx + dx, 2 * k), w = w0 > 4 * k ? w0 - seam : w0, yc = rowY(row, n.depth);
           const foc = S.block ? hl(n.fid) : inFocus(path, n.fid);
           const col = new THREE.Color(f ? modColor(f.module) : mutedC);
-          recs.push({ n, isr, path, k: inst.k, x: bx, w, y: yc, z: dz + n.depth * dzStep, col, foc, root: rr.parent < 0, ext: n.external, rec: n.recursive, via: !!n.via_table, sel: S.selPath === path });
+          recs.push({ n, isr, path, k: inst.k, x: bx, w, y: yc, z: dz + n.depth * dzStep, col, foc, root: rr.parent < 0, ext: n.external, rec: n.recursive, via: !!n.via_table, sel: S.selPath === path, g });
           boxBudget--;
-          if (w > labelMinW || S.selPath === path) labelCands.push({ pri: w, txt: n.name + (rr.parent < 0 && insts.length > 1 ? ` #${inst.k}` : '') + (rr.kids && !isOpen(rr.key, n.depth) ? ' ▸' : ''), x: bx + 0.02, y: yc, z: dz + n.depth * dzStep + 0.33, h: fh(FS.box), bold: rr.parent < 0, maxW: w - 0.02, dim: !foc, force: S.selPath === path });
+          if (w > labelMinW || S.selPath === path) labelCands.push({ pri: w, txt: n.name + (rr.parent < 0 && insts.length > 1 ? ` #${inst.k}` : '') + (rr.kids && !isOpen(rr.key, n.depth) ? ' ▸' : ''), x: bx + 0.02, y: yc, z: dz + n.depth * dzStep + 0.33, h: fh(FS.box), bold: rr.parent < 0, maxW: w - 0.02, dim: !foc, force: S.selPath === path, g });
           if (!sub) continue;
           const zm = dz + n.depth * dzStep + 0.2;
-          nodeEvents(n, isr, inst.k).forEach(e => { if (e.t_us < r0 || e.t_us > r1) return; evRecs.push({ e, n, isr, path, x: tx(e.t_us) + dx, y: yc + BOX_H / 2 + 0.06, z: zm, c: e.violation ? critC : (e.kind === 'read' ? readC : writeC), foc, big: e.violation }); });
+          nodeEvents(n, isr, inst.k).forEach(e => { if (e.t_us < r0 || e.t_us > r1) return; evRecs.push({ e, n, isr, path, x: tx(e.t_us) + dx, y: yc + BOX_H / 2 + 0.06, z: zm, c: e.violation ? critC : (e.kind === 'read' ? readC : writeC), foc, big: e.violation, g }); });
           if (f) {
-            f.vars.forEach(v => { const key = VKEY[f.id + '|' + v.name]; if (!key) return; const t = evTimeInFn(n, dt, v.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: v.rw === 'r' ? readC : (v.rw === 'addr' ? new THREE.Color(mutedC) : writeC), foc, varTip: { name: v.name + (v.member ? '.' + v.member : ''), rw: v.rw, line: v.line, key, via: v.via_macro } }); });
-            f.ipc.forEach(i => { const t = evTimeInFn(n, dt, i.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: i.macro === 'IPC_RECV' ? readC : writeC, foc, ipcTip: i }); });
-            f.heap.forEach(h => { const t = evTimeInFn(n, dt, h.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: seriousC, foc, heapTip: h }); });
+            f.vars.forEach(v => { const key = VKEY[f.id + '|' + v.name]; if (!key) return; const t = evTimeInFn(n, dt, v.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: v.rw === 'r' ? readC : (v.rw === 'addr' ? new THREE.Color(mutedC) : writeC), foc, g, varTip: { name: v.name + (v.member ? '.' + v.member : ''), rw: v.rw, line: v.line, key, via: v.via_macro } }); });
+            f.ipc.forEach(i => { const t = evTimeInFn(n, dt, i.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: i.macro === 'IPC_RECV' ? readC : writeC, foc, g, ipcTip: i }); });
+            f.heap.forEach(h => { const t = evTimeInFn(n, dt, h.seq); if (t < r0 || t > r1) return; touchRecs.push({ n, isr, path, x: tx(t) + dx, y: yc - BOX_H / 2 - 0.05, z: zm, c: seriousC, foc, g, heapTip: h }); });
           }
         }
       }
     }
   }
   tm.planes = Math.round(performance.now() - t0);
-  { const sb = bars(slotXs, ruler.yBot, ruler.yTop + 0.3, ZBACK + 0.005, fg, 0.55, 2, k); if (sb) root.add(sb); const bd = slotBands(tx, x0, x1, ruler.yBot, ruler.yTop, ZBACK - 0.01, fg, slotA, slotB, 0); if (bd) root.add(bd); }
-  const gw2 = segs(gridWeak, gridC, { opacity: 0.18 }); if (gw2) root.add(gw2);
+  { const sb = bars(slotXs, ruler.yBot, ruler.yTop + 0.3, ZBACK + 0.005, fg, 0.55, 2, k); if (sb) sticky.add(sb); const bd = slotBands(tx, x0, x1, ruler.yBot, ruler.yTop, ZBACK - 0.01, fg, slotA, slotB, 0); if (bd) sticky.add(bd); }
+  const gw2 = segs(gridWeak, gridC, { opacity: 0.18 }); if (gw2) sticky.add(gw2);
   const dls = segs(dlPts, critC, { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.65 }); if (dls) root.add(dls);
-  // --- instanced marks
+  const dlsS = segs(dlPtsS, critC, { dashed: true, dash: 0.05, gap: 0.045, opacity: 0.65 }); if (dlsS) sticky.add(dlsS);
+  // --- instanced marks, one set per group (main planes / sticky pinned rows)
   const mat = new THREE.Matrix4(), col = new THREE.Color();
-  if (envRecs.length) {
-    const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), envRecs.length, { opacity: 0.13 });
-    envRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
-    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; root.add(m); G.env = m;
-  }
-  if (gaugeRecs.length) {
-    const m = instanced(new THREE.PlaneGeometry(1, 1), gaugeRecs.length, { opacity: 0.9 });
-    gaugeRecs.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
-    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; root.add(m);
-  }
-  G.recs = recs; G.evRecs = evRecs; G.touchRecs = touchRecs;
-  if (recs.length) {
-    const m = instanced(new THREE.BoxGeometry(1, BOX_H, persp ? 0.5 : 0.3), recs.length, { lambert: true });
-    recs.forEach((r, i) => { mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); });
-    m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'box' }; root.add(m); pick3.push(m); G.boxes = m;
-  } else G.boxes = null;
-  if (evRecs.length) {
-    const m = instanced(new THREE.SphereGeometry(1, 8, 6), evRecs.length, {});
-    evRecs.forEach((r, i) => { const s = r.big ? 0.075 : 0.055; mat.makeScale(s, s, s); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); });
-    m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'ev' }; root.add(m); pick3.push(m); G.ev = m;
-  } else G.ev = null;
-  if (touchRecs.length) {
-    const m = instanced(new THREE.BoxGeometry(0.075, 0.075, 0.075), touchRecs.length, {});
-    const rot = new THREE.Matrix4().makeRotationZ(Math.PI / 4);
-    touchRecs.forEach((r, i) => { mat.copy(rot); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); });
-    m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'touch' }; root.add(m); pick3.push(m); G.touch = m;
-  } else G.touch = null;
-  // outlines for the selected / hovered box
-  G.selOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, BOX_H + 0.02, persp ? 0.52 : 0.32)), new THREE.LineBasicMaterial({ color: accentC, linewidth: 2 })); G.selOutline.visible = false; root.add(G.selOutline);
-  G.hovOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, BOX_H + 0.02, persp ? 0.52 : 0.32)), new THREE.LineBasicMaterial({ color: fg, transparent: true, opacity: 0.8 })); G.hovOutline.visible = false; root.add(G.hovOutline);
+  G.recs = recs; G.evRecs = evRecs; G.touchRecs = touchRecs; G.sets = [];
+  [[root, 0], [sticky, 1]].forEach(([grp, g]) => {
+    const env = envRecs.filter(r => r.g === g), gauge = gaugeRecs.filter(r => r.g === g), rs = recs.filter(r => r.g === g), es = evRecs.filter(r => r.g === g), ts = touchRecs.filter(r => r.g === g);
+    if (!env.length && !gauge.length && !rs.length && !es.length && !ts.length && g) return;
+    const set = { grp, recs: rs, evRecs: es, touchRecs: ts, boxes: null, ev: null, touch: null };
+    if (env.length) {
+      const m = instanced(new THREE.BoxGeometry(1, 1, 0.22), env.length, { opacity: 0.13 });
+      env.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
+      m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; grp.add(m); if (!g) G.env = m;
+    }
+    if (gauge.length) {
+      const m = instanced(new THREE.PlaneGeometry(1, 1), gauge.length, { opacity: 0.9 });
+      gauge.forEach((r, i) => { mat.makeScale(r.w, r.h, 1); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); m.setColorAt(i, r.c); });
+      m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; grp.add(m);
+    }
+    if (rs.length) {
+      const m = instanced(new THREE.BoxGeometry(1, BOX_H, persp ? 0.5 : 0.3), rs.length, { lambert: true });
+      rs.forEach((r, i) => { mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); m.setMatrixAt(i, mat); });
+      m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'box', set }; grp.add(m); pick3.push(m); set.boxes = m;
+    }
+    if (es.length) {
+      const m = instanced(new THREE.SphereGeometry(1, 8, 6), es.length, {});
+      es.forEach((r, i) => { const sz = r.big ? 0.075 : 0.055; mat.makeScale(sz, sz, sz); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); });
+      m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'ev', set }; grp.add(m); pick3.push(m); set.ev = m;
+    }
+    if (ts.length) {
+      const m = instanced(new THREE.BoxGeometry(0.075, 0.075, 0.075), ts.length, {});
+      const rot = new THREE.Matrix4().makeRotationZ(Math.PI / 4);
+      ts.forEach((r, i) => { mat.copy(rot); mat.setPosition(r.x, r.y, r.z); m.setMatrixAt(i, mat); });
+      m.instanceMatrix.needsUpdate = true; m.userData = { kind: 'touch', set }; grp.add(m); pick3.push(m); set.touch = m;
+    }
+    // outlines for the selected / hovered box
+    set.selOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, BOX_H + 0.02, persp ? 0.52 : 0.32)), new THREE.LineBasicMaterial({ color: accentC, linewidth: 2 })); set.selOutline.visible = false; grp.add(set.selOutline);
+    set.hovOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, BOX_H + 0.02, persp ? 0.52 : 0.32)), new THREE.LineBasicMaterial({ color: fg, transparent: true, opacity: 0.8 })); set.hovOutline.visible = false; grp.add(set.hovOutline);
+    G.sets.push(set);
+  });
+  G.boxes = G.sets[0] ? G.sets[0].boxes : null; G.selOutline = G.sets[0] ? G.sets[0].selOutline : null; G.hovOutline = G.sets[0] ? G.sets[0].hovOutline : null;
   tm.marks = Math.round(performance.now() - t0);
   // --- labels (capped, widest first; forced ones always)
   labelCands.sort((a, b) => (b.force ? 1e12 : b.pri) - (a.force ? 1e12 : a.pri));
@@ -530,9 +570,9 @@ function build3D() {
     const lb = label(c.txt, { h: c.h, bold: c.bold, color: c.color, opacity: c.dim && emphasis ? 0.35 : 1 });
     if (c.maxW != null && lb.scale.x > c.maxW && !c.force) continue;
     if (c.left) { const key = c.y.toFixed(3) + '|' + c.z.toFixed(2), arr = placedRows.get(key) || [], x0 = c.x - 0.04, x1 = c.x + lb.scale.x + 0.04; if (arr.some(([a, b]) => x0 < b && x1 > a)) continue; arr.push([x0, x1]); placedRows.set(key, arr); }
-    lb.position.set(c.x + lb.scale.x / 2, c.y, c.z); root.add(lb); nl++;
+    lb.position.set(c.x + lb.scale.x / 2, c.y, c.z); (c.g ? sticky : root).add(lb); nl++;
   }
-  const ax = label('time →', { color: mutedC, h: fh(FS.axis) }); ax.position.set(x1 - ax.scale.x / 2, yTop + 0.4, ZBACK); root.add(ax);
+  const ax = label('time →', { color: mutedC, h: fh(FS.axis) }); ax.position.set(x1 - ax.scale.x / 2, yTop + 0.4, ZBACK); sticky.add(ax);
   if (L.stacked && planes.length > 1) { const dg = label('cores ↘ (front = higher core)', { color: mutedC, h: fh(FS.axis) }); dg.position.set(x1 + L.maxDx - dg.scale.x / 2 + 0.3, ruler.yBot - ruler.gap / 2, PLANE_DZ() * planes.length + 0.3); root.add(dg); }
   tm.labels = Math.round(performance.now() - t0);
   G.colors = { panelC, panel2C };
@@ -552,7 +592,7 @@ function build3D() {
   updateCamera();
   tm.camera = Math.round(performance.now() - t0);
   renderLegend(); renderOverview();
-  build3D.stats = { refs: refIds.length, deadlineTicks: dlPts.length / 6, boxes: recs.length, events: evRecs.length, touches: touchRecs.length, labels: nl, lod, ms: Math.round(performance.now() - t0), objects: root.children.length, t: tm, contentPx: Math.round((ext.vTop - ext.vBot) / k), planes: planes.length };
+  build3D.stats = { refs: refIds.length, deadlineTicks: (dlPts.length + dlPtsS.length) / 6, pinnedRows: L.pinnedRows, boxes: recs.length, events: evRecs.length, touches: touchRecs.length, labels: nl, cands: labelCands.length, dlTags: labelCands.filter(c => c.left).length, lod, ms: Math.round(performance.now() - t0), objects: root.children.length, t: tm, contentPx: Math.round((ext.vTop - ext.vBot) / k), planes: planes.length };
   if (window.ISRPROF_DEBUG) console.log('BUILD', S.view, build3D.stats);
 }
 // selection-only update: recolour the instanced marks, move the selection outline, no geometry rebuild
@@ -560,18 +600,20 @@ function recolor3D() {
   if (!have3D || !G.colors) return;
   const dimTo = G.colors.panel2C, col = new THREE.Color(), mat = new THREE.Matrix4();
   const emphasis = !!(REL || S.block);
-  if (G.boxes) {
-    G.selOutline.visible = false;
-    G.recs.forEach((r, i) => {
-      r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); r.sel = S.selPath === r.path;
-      col.copy(r.col); if (r.ext) col.lerp(dimTo, 0.45); if (!r.foc && emphasis) col.lerp(dimTo, 0.8);
-      G.boxes.setColorAt(i, col);
-      if (r.sel) { mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); G.selOutline.matrix.copy(mat); G.selOutline.matrixAutoUpdate = false; G.selOutline.visible = true; }
-    });
-    G.boxes.instanceColor.needsUpdate = true;
-  }
-  if (G.ev) { G.evRecs.forEach((r, i) => { r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); col.copy(r.c); if (!r.foc && emphasis) col.lerp(dimTo, 0.75); G.ev.setColorAt(i, col); }); G.ev.instanceColor.needsUpdate = true; }
-  if (G.touch) { G.touchRecs.forEach((r, i) => { r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); col.copy(r.c); if (!r.foc && emphasis) col.lerp(dimTo, 0.75); G.touch.setColorAt(i, col); }); G.touch.instanceColor.needsUpdate = true; }
+  (G.sets || []).forEach(set => {
+    if (set.boxes) {
+      set.selOutline.visible = false;
+      set.recs.forEach((r, i) => {
+        r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); r.sel = S.selPath === r.path;
+        col.copy(r.col); if (r.ext) col.lerp(dimTo, 0.45); if (!r.foc && emphasis) col.lerp(dimTo, 0.8);
+        set.boxes.setColorAt(i, col);
+        if (r.sel) { mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); set.selOutline.matrix.copy(mat); set.selOutline.matrixAutoUpdate = false; set.selOutline.visible = true; }
+      });
+      set.boxes.instanceColor.needsUpdate = true;
+    }
+    if (set.ev) { set.evRecs.forEach((r, i) => { r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); col.copy(r.c); if (!r.foc && emphasis) col.lerp(dimTo, 0.75); set.ev.setColorAt(i, col); }); set.ev.instanceColor.needsUpdate = true; }
+    if (set.touch) { set.touchRecs.forEach((r, i) => { r.foc = S.block ? hl(r.n.fid) : inFocus(r.path, r.n.fid); col.copy(r.c); if (!r.foc && emphasis) col.lerp(dimTo, 0.75); set.touch.setColorAt(i, col); }); set.touch.instanceColor.needsUpdate = true; }
+  });
   draw();
 }
 function renderLegend() {
@@ -609,15 +651,16 @@ function pickAt(e) {
 }
 function hitRec(h) {
   const u = h.object.userData;
-  if (u.kind === 'box') return { kind: 'box', r: G.recs[h.instanceId] };
-  if (u.kind === 'ev') return { kind: 'ev', r: G.evRecs[h.instanceId] };
-  if (u.kind === 'touch') return { kind: 'touch', r: G.touchRecs[h.instanceId] };
+  if (u.kind === 'box') return { kind: 'box', r: u.set.recs[h.instanceId], set: u.set };
+  if (u.kind === 'ev') return { kind: 'ev', r: u.set.evRecs[h.instanceId], set: u.set };
+  if (u.kind === 'touch') return { kind: 'touch', r: u.set.touchRecs[h.instanceId], set: u.set };
   if (u.kind === 'ch') return { kind: 'ch', r: G.chRecs[h.instanceId] };
   return { kind: 'label', u };
 }
 function setHover(h) {
   const r = h && h.kind === 'box' ? h.r : null;
-  if (G.hovOutline) { if (r && !r.sel) { const mat = new THREE.Matrix4(); mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); G.hovOutline.matrix.copy(mat); G.hovOutline.matrixAutoUpdate = false; G.hovOutline.visible = true; } else G.hovOutline.visible = false; }
+  (G.sets || []).forEach(set => { if (set.hovOutline) set.hovOutline.visible = false; });
+  if (r && !r.sel && h.set && h.set.hovOutline) { const mat = new THREE.Matrix4(); mat.makeScale(r.w, 1, 1); mat.setPosition(r.x + r.w / 2, r.y, r.z); h.set.hovOutline.matrix.copy(mat); h.set.hovOutline.matrixAutoUpdate = false; h.set.hovOutline.visible = true; }
   renderer.domElement.style.cursor = h ? 'pointer' : (ortho() || S.panMode ? 'move' : 'grab'); draw();
 }
 function pick(e) {
@@ -636,7 +679,16 @@ function click(e) {
   if (x.kind === 'box') { const r = x.r; if (r.n.children.length) toggleExp(r.path); selectNode(r.path, r.n.fid); return; }
   if (x.kind === 'ev' || x.kind === 'touch') { selectNode(x.r.path, x.r.n.fid); return; }
   if (x.kind === 'label' && x.u.isrRow) { const isr = x.u.isrRow; selectNode(isr.name + '#' + shownInst(isr).k, isr.tree.fid); return; }
+  if (x.kind === 'label' && x.u.pinIsr) { togglePin(x.u.pinIsr); return; }
 }
+
+// pinned rows: remembered per profile (browser storage, best effort); #pin-A,B in the deep link sets them too
+const PIN_KEY = 'isrprof.pins.' + (P.project.profile || P.project.name);
+function loadPins() { try { const a = JSON.parse(localStorage.getItem(PIN_KEY) || '[]'); return Array.isArray(a) ? a.filter(n => ISRX[n]) : []; } catch (e) { return []; } }
+function savePins() { try { localStorage.setItem(PIN_KEY, JSON.stringify([...S.pinned])); } catch (e) { /* storage unavailable */ } }
+function setPins(names) { S.pinned = new Set([...names].filter(n => ISRX[n])); savePins(); if (typeof renderIsrList === 'function') renderIsrList(); if (S.tab === 'timing') { if (have3D) build3D(); else build2D(); } }
+function togglePin(name) { const next = new Set(S.pinned); if (next.has(name)) next.delete(name); else next.add(name); setPins(next); }
+S.pinned = new Set(loadPins());
 
 // ------------------------------------------------------------------ 2D fallback (no WebGL): same layout, flat SVG
 function build2D() {

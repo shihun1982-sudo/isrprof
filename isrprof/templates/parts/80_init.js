@@ -41,7 +41,7 @@ function renderIsrList() {
     const rows = P.isrs.filter(i => i.core === c.id && (!filt || i.name.toLowerCase().includes(filt)));
     if (!rows.length) return '';
     return `<div class="core-h"><i class="sw" style="background:${coreColor(c.id)}"></i>${esc(c.name)} <button class="tog mini" data-core-only="${c.id}" title="only this core's ISRs">only</button></div>` +
-      rows.map(i => `<label><input type="checkbox" data-isr="${esc(i.name)}" ${!S.isrs || S.isrs.has(i.name) ? 'checked' : ''}>${esc(i.name)} <span class="info">${esc(TIX[i.timing].name)} +${(i.start_us / SYM).toFixed(1)}</span></label>`).join('');
+      rows.map(i => `<label><input type="checkbox" data-isr="${esc(i.name)}" ${!S.isrs || S.isrs.has(i.name) ? 'checked' : ''}>${esc(i.name)} <span class="info">${esc(TIX[i.timing].name)} +${(i.start_us / SYM).toFixed(1)}</span><button class="tog mini pin" data-pin="${esc(i.name)}" aria-pressed="${S.pinned.has(i.name)}" title="pin this row to the top of the timing diagram (stays visible while scrolling)">📌</button></label>`).join('');
   }).join('');
   const n = S.isrs ? S.isrs.size : P.isrs.length;
   isrSummary.textContent = !S.isrs ? `all ISRs (${P.isrs.length})` : n === 0 ? 'no ISR' : n <= 2 ? [...S.isrs].join(', ') : `${n} of ${P.isrs.length} ISRs`;
@@ -52,7 +52,7 @@ function setIsrs(names) {            // names: null (all) or iterable of ISR nam
   renderIsrList(); build3D.fitted = false; renderAll();
 }
 isrList.addEventListener('change', e => { const i = e.target; if (!i.dataset || !i.dataset.isr) return; const cur = new Set(S.isrs || P.isrs.map(x => x.name)); if (i.checked) cur.add(i.dataset.isr); else cur.delete(i.dataset.isr); setIsrs(cur); });
-isrList.addEventListener('click', e => { const b = e.target.closest('button[data-core-only]'); if (!b) return; e.preventDefault(); setIsrs(P.isrs.filter(i => i.core === +b.dataset.coreOnly).map(i => i.name)); });
+isrList.addEventListener('click', e => { const pb = e.target.closest('button[data-pin]'); if (pb) { e.preventDefault(); togglePin(pb.dataset.pin); return; } const b = e.target.closest('button[data-core-only]'); if (!b) return; e.preventDefault(); setIsrs(P.isrs.filter(i => i.core === +b.dataset.coreOnly).map(i => i.name)); });
 document.getElementById('isr-all').onclick = e => { e.preventDefault(); setIsrs(null); };
 document.getElementById('isr-none').onclick = e => { e.preventDefault(); setIsrs([]); };
 document.getElementById('isr-filter').addEventListener('input', renderIsrList);
@@ -94,8 +94,8 @@ document.getElementById('focus-deep').onclick = () => setDeep(true);
 document.getElementById('focus-clear').onclick = clearFocus;
 document.getElementById('range-full').onclick = () => applyRange(null);
 document.getElementById('tscale').addEventListener('input', e => { S.tscale = Math.pow(2, +e.target.value); build3D.fitted = false; if (S.tab === 'timing') build3D(); });
-function setSwDepth(d) { S.swDepth = Math.max(1, d | 0); S.swOpen.clear(); S.swClosed.clear(); document.getElementById('sw-depth').value = S.swDepth; document.getElementById('sw-depth-v').textContent = S.swDepth; renderSW(); }
-function setHwDepth(d) { S.hwDepth = Math.max(1, d | 0); S.hwOpen.clear(); S.hwClosed.clear(); document.getElementById('hw-depth').value = S.hwDepth; document.getElementById('hw-depth-v').textContent = S.hwDepth; renderHW(); }
+function setSwDepth(d) { S.swDepth = Math.max(1, Math.min(+document.getElementById('sw-depth').max || 6, d | 0)); S.swOpen.clear(); S.swClosed.clear(); document.getElementById('sw-depth').value = S.swDepth; document.getElementById('sw-depth-v').textContent = S.swDepth; renderSW(); }
+function setHwDepth(d) { S.hwDepth = Math.max(1, Math.min(+document.getElementById('hw-depth').max || 6, d | 0)); S.hwOpen.clear(); S.hwClosed.clear(); document.getElementById('hw-depth').value = S.hwDepth; document.getElementById('hw-depth-v').textContent = S.hwDepth; renderHW(); }
 const swMax = Math.max(1, ...SWS.nodes.map(n => n.depth + 1)), hwMax = Math.max(1, ...HWS.nodes.map(n => n.depth + 1));
 document.getElementById('sw-depth').max = swMax; document.getElementById('hw-depth').max = hwMax;
 S.swDepth = Math.min(S.swDepth, swMax); S.hwDepth = Math.min(S.hwDepth, hwMax);
@@ -205,7 +205,7 @@ document.getElementById('panels-expand').onclick = () => panels.forEach(d => { d
 init3D();
 if (have3D) resize3D();
 // deep links (tokens joined with "--"):  structure | sel-<function or ISR> (callees included) | selonly-<name>
-//   | range-<startSlot>~<endSlot> | view-3d | view-tilt | view-aligned | level-<n> | swdepth-<n> | hwdepth-<n> | selftest
+//   | range-<startSlot>~<endSlot> | view-3d | view-tilt | view-aligned | level-<n> | swdepth-<n> | hwdepth-<n> | pin-<ISR,ISR> | selftest
 //   e.g.  #sel-DL_PDSCH_ISR--range-0.9~1.3--view-3d
 let SELFTEST = false;
 location.hash.replace(/^#/, '').split('--').forEach(tok => {
@@ -219,6 +219,7 @@ location.hash.replace(/^#/, '').split('--').forEach(tok => {
   m = /^swdepth-(\d+)$/.exec(tok); if (m) { S.swDepth = +m[1]; }
   m = /^hwdepth-(\d+)$/.exec(tok); if (m) { S.hwDepth = +m[1]; }
   m = /^isr-(.+)$/.exec(tok); if (m) { S.isrs = new Set(m[1].split(',').filter(n => ISRX[n])); renderIsrList(); }
+  m = /^pin-(.*)$/.exec(tok); if (m) { S.pinned = new Set(m[1].split(',').filter(n => ISRX[n])); renderIsrList(); }
   m = /^slots-(-?\d+)~(\d+)$/.exec(tok); if (m) { const from = +m[1], count = +m[2]; S.range = { start: Math.max(W0, from * SLOT), end: Math.min(W1, (from + count) * SLOT) }; }
   m = /^overlap-(\d+)$/.exec(tok); if (m) { S.overlap = Math.max(0, Math.min(0.85, +m[1] / 100)); ovEl.value = Math.round(S.overlap * 100); document.getElementById('overlap-v').textContent = ovEl.value + '%'; }
   m = /^sel(only)?-([A-Za-z0-9_.~]+)$/.exec(tok);
@@ -325,7 +326,7 @@ function selfTest() {
   step('slots 2 from 1', () => { setSlots(1, 2); return { boxes: stats().boxes, from: slotFrom.value, count: slotCount.value, range: document.getElementById('range-info').textContent }; });
   step('slots next', () => { document.getElementById('slot-next').click(); return { from: slotFrom.value, count: slotCount.value, max: slotMax }; });
   step('slots default', () => { setSlots(0, 5); return { from: slotFrom.value, count: slotCount.value, boxes: stats().boxes }; });
-  step('overlap 0 / 70', () => { const v = S.view; S.view = 'tilt'; S.overlap = 0; build3D(); const h0 = stats().contentPx; S.overlap = 0.7; build3D(); const h1 = stats().contentPx; S.overlap = 0.5; S.view = v; build3D(); return { contentNoOverlap: h0, contentOverlap70: h1, planes: stats().planes }; });
+  step('overlap 0 / 70', () => { const v = S.view; S.view = 'tilt'; S.overlap = 0; build3D(); const h0 = stats().contentPx; S.overlap = 0.7; build3D(); const h1 = stats().contentPx; S.overlap = +ovEl.value / 100; S.view = v; build3D(); return { contentNoOverlap: h0, contentOverlap70: h1, planes: stats().planes }; });
   step('resize side / windows', () => {
     wrap.style.setProperty('--side-w', '500px'); const w = document.getElementById('side').getBoundingClientRect().width; wrap.style.removeProperty('--side-w');
     const drag = (panelId, dy) => { const h = document.querySelector('#' + panelId + ' > .rz'); const r = h.getBoundingClientRect(); const o = { bubbles: true, pointerId: 1, button: 0, clientX: r.left + 20, clientY: r.top + 2 };
@@ -333,18 +334,111 @@ function selfTest() {
     const dragEl = (el, dy) => { const r = el.getBoundingClientRect(); const o = { bubbles: true, pointerId: 1, button: 0, clientX: r.left + 20, clientY: r.top + 2 }; el.dispatchEvent(new PointerEvent('pointerdown', o)); el.dispatchEvent(new PointerEvent('pointermove', Object.assign({}, o, { clientY: r.top + 2 + dy }))); el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, o, { clientY: r.top + 2 + dy }))); };
     const tree = document.getElementById('tree-panel'), t0 = tree.getBoundingClientRect().height; dragEl(document.getElementById('hsplit'), 120); const t1 = tree.getBoundingClientRect().height;
     const sideEl = document.getElementById('side'), sw0 = sideEl.getBoundingClientRect().width; const sp = document.getElementById('splitter'), spr = sp.getBoundingClientRect(); const o2 = { bubbles: true, pointerId: 1, button: 0, clientX: spr.left + 3, clientY: spr.top + 40 }; sp.dispatchEvent(new PointerEvent('pointerdown', o2)); sp.dispatchEvent(new PointerEvent('pointermove', Object.assign({}, o2, { clientX: spr.left - 150 }))); sp.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, o2, { clientX: spr.left - 150 }))); const sw1 = sideEl.getBoundingClientRect().width; sp.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    const sw = document.getElementById('sw'), s0 = sw.getBoundingClientRect().height; drag('sw-panel', -40); const s1 = sw.getBoundingClientRect().height;
+    const sw = document.getElementById('sw'), s0 = sw.getBoundingClientRect().height; drag('sw-panel', 60); const s1 = sw.getBoundingClientRect().height;     // grow (a small tree may already sit at the minimum height)
     const sc0 = sceneEl.getBoundingClientRect().height; drag('scene-panel', 90); const sc1 = sceneEl.getBoundingClientRect().height;
     document.getElementById('hsplit').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); document.querySelector('#sw-panel > .rz').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); document.querySelector('#scene-panel > .rz').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     return { sideW: Math.round(w), sideDrag: Math.round(sw1 - sw0), treeBefore: Math.round(t0), treeAfter: Math.round(t1), swBefore: Math.round(s0), swAfter: Math.round(s1), sceneBefore: Math.round(sc0), sceneAfter: Math.round(sc1), handles: document.querySelectorAll('.rz').length }; });
   step('unit us', () => { setUnit('us'); const t = document.getElementById('range-info').textContent; setUnit('sym'); return { text: t }; });
+  step('pin rows', () => {
+    const before = stats().pinnedRows, b0 = stats().boxes; setPins([isr.name]); const r = { before, after: stats().pinnedRows, boxesBefore: b0, boxesAfter: stats().boxes, listPressed: document.querySelectorAll('#isr-list button[data-pin][aria-pressed="true"]').length };
+    // force a window smaller than the content so the rows really scroll, then check the sticky band follows the scroll
+    const keepH = S.sceneH; S.sceneH = 220; build3D(); r.contentPx = stats().contentPx; r.scenePx = sceneEl.clientHeight;
+    r.stickyY0 = G.sticky ? +G.sticky.position.y.toFixed(3) : null; ext.yShift = -1e9; updateCamera(); r.shift = +ext.yShift.toFixed(3); r.stickyY1 = G.sticky ? +G.sticky.position.y.toFixed(3) : null;
+    r.pinnedBoxesInSticky = G.sets && G.sets[1] ? G.sets[1].recs.length : 0; r.pinnedRowIsr = G.sets && G.sets[1] && G.sets[1].recs[0] ? G.sets[1].recs[0].isr.name : null;
+    ext.yShift = 0; S.sceneH = keepH; build3D();
+    const row = [...document.querySelectorAll('#isr-list button[data-pin]')].find(b => b.dataset.pin === isr.name); row.click(); r.afterClick = stats().pinnedRows; r.stored = (function () { try { return localStorage.getItem('isrprof.pins.' + (P.project.profile || P.project.name)); } catch (e) { return null; } })();
+    return r; });
   step('structure tab', () => { document.querySelector('.tabs button[data-tab="structure"]').click(); const r = { dsmRows: document.querySelectorAll('#dsm tbody tr').length, dsmCanvas: !!document.querySelector('#dsm canvas'), ms: renderStructure.ms, tiles: document.querySelectorAll('#tiles .tile').length, lsmNodes: document.querySelectorAll('#lsm .lsm-node').length }; document.querySelector('.tabs button[data-tab="timing"]').click(); return r; });
   step('deep link sel', () => { const f = Object.keys(F)[0]; selectNode(findPath(f), f); return { selFid: S.selFid, selPath: S.selPath }; });
   out.errors = ERRORS.slice();
   out.ok = !out.errors.length && out.steps.every(s => !s.error);
+
+  // ---- control sweep: every window, checkbox, button, number / range input and select is driven through its
+  // states (off / on, min / max / middle, every option, open / closed) and the page must react (signature of what
+  // is drawn) and recover; results are one step per control ("sweep:<kind>:<id>") plus a summary
+  controlSweep(step, stats, isr);
   const pre = document.getElementById('selftest-out'); pre.hidden = false; pre.textContent = JSON.stringify(out, null, 1);
   console.log('SELFTEST ' + JSON.stringify(out));
   return out;
 }
-window.isrprof = { S, P, REL: () => REL, setRefs, selectVariable, selectIpc, histBack, histForward, selectNode, selectBlock, selectSwNode, clearFocus, setLevel, setDeep, setView, applyRange, setSlots, setIsrs, setCores, setSwDepth, setHwDepth, build3D, renderAll, selfTest, stats: () => build3D.stats };
+
+function controlSweep(step, stats, isr) {
+  const q = sel => [...document.querySelectorAll(sel)];
+  const hash = t => { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return h; };
+  const vb = id => (document.querySelector('#' + id + ' svg') || { getAttribute: () => '' }).getAttribute('viewBox') || '';
+  // what the page shows: drawn marks, DOM contents of every window, view / camera / scroll state, selection
+  const sig = () => { const st = stats(); return JSON.stringify({ boxes: st.boxes, refs: st.refs, planes: st.planes, pinned: st.pinnedRows, ticks: st.deadlineTicks, labels: st.labels, events: st.events, sceneH: sceneEl.clientHeight,
+    sw: q('#sw .nd').length + '/' + q('#sw .nd.dim').length + '/' + q('#sw .nd.sel').length, hw: q('#hw .nd').length + '/' + q('#hw .nd.dim').length, swVB: vb('sw'), hwVB: vb('hw'),
+    tree: q('#tree-body .row').length, treeH: hash(document.getElementById('tree-body').textContent), detailH: hash(document.getElementById('detail-body').textContent), legend: hash(document.getElementById('legend').textContent || ''),
+    range: document.getElementById('range-info').textContent, isrs: isrSummary.textContent, tab: S.tab, view: S.view, unit: S.unit, level: S.level, inst: S.allInst, focus: document.getElementById('focus-info').textContent,
+    open: q('details.panel').map(d => d.open ? 1 : 0).join(''), dsm: q('#dsm tr').length, cam: have3D ? [cam.theta, cam.phi, cam.radius, cam.target.x, cam.target.y, cam.target.z].map(v => +v.toFixed(3)).join(',') : '', yShift: +(ext.yShift || 0).toFixed(3), rootX: have3D ? +root.position.x.toFixed(3) : 0,
+    sel: S.selFid + '|' + S.selPath + '|' + S.block + '|' + S.swNode, inst: JSON.stringify(S.inst) + '|' + S.expanded.size + '|' + S.collapsed.size, cands: st.cands, dlTags: st.dlTags, impact: S.impactMode + '|' + S.impactTarget + '|' + S.impactPos, overlap: S.overlap, tscale: S.tscale, depth: S.swDepth + '/' + S.hwDepth }); };
+  // controls are addressed by a selector and looked up at the moment they are driven: the lists (ISRs, references,
+  // call graph, details) are re-rendered by other controls, so a stale element reference would click into the void
+  const selOf = el => { if (el.id) return '#' + el.id; for (const k of ['isr', 'core', 'ref', 'pin', 'coreOnly', 'view', 'tab', 'imp']) if (el.dataset[k] != null) return `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}="${el.dataset[k]}"]`; if (el.dataset.pz) return `[data-pz="${el.dataset.pz}"][data-host="${el.dataset.host}"]`; return null; };
+  const nameOf = el => el.id || el.dataset.view || el.dataset.pz && (el.dataset.pz + '@' + el.dataset.host) || el.dataset.tab || el.dataset.ref || el.dataset.isr || (el.dataset.core != null ? 'core@' + el.dataset.core : null) || el.dataset.pin && ('pin@' + el.dataset.pin) || el.dataset.coreOnly && ('only@' + el.dataset.coreOnly) || el.dataset.imp && ('impact@' + el.dataset.imp) || (el.closest('label') ? el.closest('label').textContent.trim().slice(0, 30) : el.textContent.trim().slice(0, 30));
+  const fire = (el, types) => types.forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
+  const diff = (a, b) => { const A = JSON.parse(a), B = JSON.parse(b); return Object.keys(A).filter(k => JSON.stringify(A[k]) !== JSON.stringify(B[k])).map(k => k + ':' + JSON.stringify(A[k]) + '->' + JSON.stringify(B[k])); };
+  // build3D.stats only moves on a full build (selection changes recolour in place), so a baseline is taken after one
+  const fresh = () => { if (have3D && S.tab === 'timing') build3D(); };
+  const summary = { checkboxes: 0, buttons: 0, numbers: 0, ranges: 0, selects: 0, panels: 0, noEffect: [], notRestored: [], errors: 0 };
+  const sw = (name, fn) => step('sweep:' + name, () => { try { return fn(); } catch (e) { summary.errors++; throw e; } });
+  const selectRoot = () => { clearFocus(); selectNode(isr.name + '#' + shownInst(isr).k, isr.tree.fid); };
+  const nested = isr.flat.find(r => r.depth >= 1), selectNested = () => { if (nested) selectNode(isr.name + '#' + shownInst(isr).k + nested.key.slice(isr.name.length), nested.n.fid); else selectRoot(); };
+  document.querySelector('.tabs button[data-tab="timing"]').click(); setLevel(S.level); selectRoot();     // explicit expansions dropped: changing the level resets them by design
+  // 1. windows: every panel closes to its summary and opens again (panels of the hidden tab are reported as hidden)
+  q('details.panel').forEach(d => sw('panel:' + d.id, () => {
+    if (d.offsetParent === null) return { hidden: true, ok: true };
+    const o0 = d.open, sum = d.querySelector('summary'), sh = sum ? sum.getBoundingClientRect().height : 0;
+    d.open = false; const closedH = d.getBoundingClientRect().height; d.open = true; const openH = d.getBoundingClientRect().height; d.open = o0; summary.panels++;
+    return { summaryPx: Math.round(sh), closedPx: Math.round(closedH), openPx: Math.round(openH), ok: closedH <= sh + 6 && openH > closedH + 10 }; }));
+  sw('panel:isr-dd', () => { const dd = document.getElementById('isr-dd'), body = dd.querySelector('.dd-body'); const onTop = () => { const r = body.getBoundingClientRect(); if (!r.width || !r.height) return false; const el = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + Math.min(20, r.height / 2)); return !!el && body.contains(el); }; dd.open = true; const a = onTop(); dd.open = false; const b = onTop(); return { openOnTop: a, closedOnTop: b, ok: a && !b }; });
+  // 2. checkboxes: toggled and toggled back, the picture must change and come back
+  const cbSels = q('input[type=checkbox]').map(selOf).filter(Boolean).slice(0, 80);
+  cbSels.forEach(sel => sw('checkbox:' + nameOf(document.querySelector(sel)), () => {
+    if (sel === '#pin-root') selectNested();                         // pinning the root as root changes nothing; pin a nested function
+    fresh(); let cb = document.querySelector(sel); const s0 = sig(), c0 = cb.checked; cb.click(); const s1 = sig(), c1 = (document.querySelector(sel) || cb).checked; cb = document.querySelector(sel) || cb; cb.click(); fresh(); const s2 = sig();
+    const r = { was: c0, toggled: c1 !== c0, effect: s1 !== s0, restored: s2 === s0 && (document.querySelector(sel) || cb).checked === c0, changed: diff(s0, s1).slice(0, 12), diff: diff(s0, s2) }; summary.checkboxes++;
+    if (sel === '#pin-root') selectRoot();
+    if (!r.effect) summary.noEffect.push('checkbox:' + nameOf(cb)); if (!r.restored) summary.notRestored.push('checkbox:' + nameOf(cb)); return r; }));
+  // 3. number inputs: min, max, middle; every number input is restored afterwards (slot from / count clamp each other)
+  const numSels = q('input[type=number]').map(selOf).filter(Boolean);
+  numSels.forEach(sel => sw('number:' + nameOf(document.querySelector(sel)), () => {
+    if (sel === '#level') { setLevel(S.level); selectRoot(); }          // the level resets explicit expansions; start from the state its restore will reproduce
+    fresh(); const inp = document.querySelector(sel), v0s = numSels.map(x => document.querySelector(x).value), min = inp.min !== '' ? +inp.min : -3, max = inp.max !== '' ? +inp.max : 12, s0 = sig(), r = { v0: inp.value, tried: [] };
+    for (const v of [min, max, Math.round((min + max) / 2)]) { inp.value = v; fire(inp, ['input', 'change']); r.tried.push({ set: v, got: inp.value, effect: sig() !== s0 }); }
+    for (let pass = 0; pass < 2; pass++) numSels.forEach((x, i) => { const e = document.querySelector(x); if (e.value !== v0s[i]) { e.value = v0s[i]; fire(e, ['input', 'change']); } });   // only the inputs that moved (slot from / count clamp each other)
+    if (sel === '#level') selectRoot();
+    fresh(); r.restored = sig() === s0; r.diff = diff(s0, sig()); r.effect = r.tried.some(t => t.effect); summary.numbers++;
+    if (!r.effect) summary.noEffect.push('number:' + nameOf(inp)); if (!r.restored) summary.notRestored.push('number:' + nameOf(inp)); return r; }));
+  // 4. sliders: min, max, middle, back (the core-overlap slider acts in the stacked view only, so it is driven there)
+  q('input[type=range]').map(selOf).filter(Boolean).forEach(sel => sw('range:' + nameOf(document.querySelector(sel)), () => {
+    fresh(); const inp = document.querySelector(sel), tiltFor = inp.id === 'overlap', view0 = S.view, s0 = sig(); if (tiltFor) setView('tilt');
+    const v0 = inp.value, min = +inp.min, max = +inp.max, sBase = sig(), r = { v0, tried: [] };
+    for (const v of [min, max, (min + max) / 2]) { inp.value = v; fire(inp, ['input', 'change']); r.tried.push({ set: v, got: inp.value, effect: sig() !== sBase }); }
+    inp.value = v0; fire(inp, ['input', 'change']); if (tiltFor) setView(view0 === 'persp' ? 'iso' : view0); fresh(); r.restored = sig() === s0; r.diff = diff(s0, sig()); r.effect = r.tried.some(t => t.effect); summary.ranges++;
+    if (!r.effect) summary.noEffect.push('range:' + nameOf(inp)); if (!r.restored) summary.notRestored.push('range:' + nameOf(inp)); return r; }));
+  // 5. the ISR filter box narrows the list
+  sw('search:isr-filter', () => { const f = document.getElementById('isr-filter'), n0 = q('#isr-list input').length; f.value = isr.name.slice(0, 6).toLowerCase(); fire(f, ['input']); const n1 = q('#isr-list input').length; f.value = ''; fire(f, ['input']); return { all: n0, filtered: n1, back: q('#isr-list input').length, effect: n1 < n0 && n1 > 0 }; });
+  // 6. selects (impact › move: target ISR and position): every option must change the analysis text
+  S.impactMode = 'move'; renderDetail();
+  q('select').map(selOf).filter(Boolean).forEach(sel => sw('select:' + nameOf(document.querySelector(sel)), () => { let el = document.querySelector(sel); const s0 = sig(), v0 = el.value, r = { options: el.options.length, effects: 0 }; for (const v of [...el.options].map(o => o.value)) { el = document.querySelector(sel); el.value = v; fire(el, ['change']); if (sig() !== s0) r.effects++; } el = document.querySelector(sel); el.value = v0; fire(el, ['change']); r.effect = r.effects > 0 || r.options < 2; summary.selects++; if (!r.effect) summary.noEffect.push('select:' + nameOf(el)); return r; }));
+  S.impactMode = 'usedby'; renderDetail();
+  // 7. buttons: every visible one is clicked (cumulative ones - zoom, move, levels, slots - are reset afterwards); a toggle button must flip aria-pressed
+  const skip = new Set(['panels-collapse', 'panels-expand']);
+  const btnSels = [], seen = new Set();
+  q('button').forEach(b => { const sel = selOf(b) || null, nm = 'button:' + nameOf(b); if (skip.has(b.id) || b.closest('#selftest-out') || seen.has(nm)) return; seen.add(nm); btnSels.push([nm, sel, b]); });
+  btnSels.forEach(([nm, sel, b0]) => sw(nm, () => {
+    const b = (sel && document.querySelector(sel)) || b0; if (!b.isConnected) return { detached: true, effect: false, skipped: true }; if (b.hidden || b.offsetParent === null) return { hidden: true, effect: false, skipped: true };
+    fresh(); const s0 = sig(), p0 = b.getAttribute('aria-pressed'), sel0 = b.getAttribute('aria-selected'); b.click(); const b2 = (sel && document.querySelector(sel)) || b, s1 = sig(), p1 = b2.getAttribute('aria-pressed'), sel1 = b2.getAttribute('aria-selected');
+    const r = { effect: s1 !== s0, pressed: p0 == null ? null : [p0, p1], selected: sel0 == null ? null : [sel0, sel1] };
+    if (p0 != null && p0 === p1) r.pressedUnchanged = true;
+    summary.buttons++; if (!r.effect && !(p0 != null && p0 !== p1)) summary.noEffect.push(nm); return r; }));
+  document.querySelector('.tabs button[data-tab="timing"]').click();
+  sw('button:panels-collapse', () => { const panels = q('details.panel'); document.getElementById('panels-collapse').click(); const closed = panels.filter(d => !d.open).length; document.getElementById('panels-expand').click(); const open = panels.filter(d => d.open).length; return { panels: panels.length, closed, open, effect: closed === panels.length && open === panels.length }; });
+  // 8. back to a known state
+  sw('reset', () => { setIsrs(null); setCores(CORES.map(c => c.id)); setRefs([]); setLevel(EXPAND_DEPTH); S.allInst = false; document.getElementById('inst-all').setAttribute('aria-pressed', 'false'); setUnit('sym'); if (have3D) setView('aligned'); applyRange(null); S.tscale = 1; document.getElementById('tscale').value = 0; setSwDepth(SWS.depth || 3); setHwDepth(HWS.depth || 2); setPins([]); selectRoot(); return { boxes: stats().boxes, planes: stats().planes, treeRows: q('#tree-body .row').length }; });
+  step('sweep summary', () => Object.assign({}, summary, { noEffect: summary.noEffect.slice(0, 60), notRestored: summary.notRestored.slice(0, 60) }));
+}
+window.isrprof = { S, P, REL: () => REL, setRefs, selectVariable, selectIpc, histBack, histForward, selectNode, selectBlock, selectSwNode, clearFocus, setLevel, setDeep, setView, applyRange, setSlots, setIsrs, setCores, setSwDepth, setHwDepth, setPins, togglePin, build3D, renderAll, selfTest, stats: () => build3D.stats };
 if (SELFTEST) setTimeout(selfTest, 0);

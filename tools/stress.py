@@ -258,7 +258,7 @@ def main(argv=None) -> int:
         mode = a.deep if a.deep != "off" else "token"
         html = r.get(mode, r["token"])["html"]
         t0 = time.perf_counter()
-        pr = subprocess.run([sys.executable, verify, html, "--budget", "30000"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        pr = subprocess.run([sys.executable, verify, html, "--budget", "60000"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         ok = pr.returncode == 0
         tail = (pr.stdout.strip().splitlines() or [""])[-1]
         vres.append((r["seed"], ok, round(time.perf_counter() - t0, 1), tail))

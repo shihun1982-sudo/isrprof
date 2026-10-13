@@ -31,7 +31,10 @@ deep:
   max_files: 0                 # 0 = no limit (useful for a first look at a huge tree)
   build:                       # objects backend only
     run: false                 # run cmake.configure + build_command before reading the objects (needs the project toolchain)
-    objects: ["build/**/*.o"]  # the project's objects; when none exist the TUs are compiled here ...
+    cwd: .                     # where those commands run (relative to root)
+    dir: build                 # the real build folder: its *.o are read (default cmake.build_dir); objects: [...] globs override
+    # obj_dir: ../../output/cxx_modem/obj   # where the zig-compiled objects go (default output/<name>/.cache/obj)
+                               # when the build folder holds no objects the TUs are compiled here ...
     compile: auto              # ... with zig (pip install ziglang): auto | zig | off
     mcpu: cortex_m4            # zig -mcpu for the mapped target (arm-none-eabi -> arm-freestanding-eabi)
     reader: elf                # elf: built-in ELF reader (no tools) | binutils: nm / objdump text

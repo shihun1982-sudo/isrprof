@@ -114,7 +114,10 @@ deep:
   max_files: 0
   build:                     # objects 백엔드
     run: false               # cmake.configure + build_command 를 먼저 실행할지 (프로젝트 툴체인이 있는 PC)
-    objects: ["build/**/*.o"]  # 읽을 오브젝트. 없으면 아래 compile 로 직접 만듦
+    cwd: .                   # 빌드 명령을 실행할 폴더 (root 기준, 기본 root)
+    dir: build               # 실제 빌드 폴더 = 오브젝트(.o)를 읽을 곳 (기본 cmake.build_dir, 없으면 <root>/build; 절대 경로 가능)
+    objects: []              # 직접 지정할 때만: root 기준 glob (예 ["C:/work/build_arm/**/*.o"]). 비우면 dir 아래 전체
+    obj_dir: null            # zig 로 직접 컴파일한 오브젝트를 둘 폴더 (기본 output/<name>/.cache/obj)
     compile: auto            # auto: 오브젝트가 없을 때만 zig 로 컴파일 | zig: 항상 | off: 안 함
     zig_target: null         # 비우면 deep.target 을 변환 (arm-none-eabi -> arm-freestanding-eabi, aarch64-none-elf -> aarch64-freestanding-none ...)
     mcpu: cortex_m4          # ARM 기본값. 실제 코어에 맞게 (cortex_a53, cortex_r5 ...)
@@ -128,6 +131,10 @@ deep:
 테이블·vtable), 데이터 참조를 읽어 이름을 디맹글합니다. 같은 섹션의 static 함수 호출은 어셈블러가 재배치 없이 해결하므로 Thumb/ARM/AArch64/x86
 명령을 직접 디코드해 보충합니다. 레지스터·변수의 읽기/쓰기 방향과 가상 호출 대상은 오브젝트에 남지 않으므로, 가장 완전한 설정은 `backend: both` 입니다.
 Windows 32/64-bit 모두 Python + `pip install ziglang` 만으로 ARM 트리를 실제로 컴파일합니다(툴체인 설치 불필요).
+
+정리하면 빌드 관련 폴더 입력은 세 가지입니다: `build.root`(소스 루트, 파일 글롭의 기준), `deep.build.cwd`(cmake/빌드 명령을
+실행할 폴더), `deep.build.dir`(실제 빌드 폴더: `.o` 를 읽는 곳). `cmake.build_dir` 만 적어도 `dir` 의 기본값으로 쓰입니다.
+프로젝트 빌드를 돌리지 않는 PC(`run: false`, 오브젝트 없음)에서는 `dir` 은 무시되고 zig 가 `obj_dir` 에 직접 컴파일합니다.
 
 결과 JSON의 `deep` 섹션에 백엔드·TU 수·정제/추가된 함수 수·캐시 적중·경고가 기록되고, 함수 테이블의 `precise`,
 `kind`(function/method/ctor/dtor/template), `cls`, `virtual`, `overrides`, 호출의 `kind`(direct/member/virtual/indirect/ctor)와
@@ -312,6 +319,12 @@ output/<name>/
 - 모든 창은 아래 모서리를 드래그해 높이를 바꿀 수 있고, 오른쪽 열은 가운데 분할선을 드래그해 너비를 바꿉니다(더블클릭으로 초기화, 브라우저에 기억됨). 세 오버레이는 기본적으로 한 화면(SW 22% / Timing 46% / HW 22%)에 들어오도록 크기가 잡힙니다.
 - 딥링크: `#sel-<ISR 또는 함수>`, `#selonly-<함수>`, `#range-0.9~1.3`, `#slots-2~3`, `#isr-A,B`, `#overlap-70`, `#view-3d|tilt|aligned`, `#level-4`, `#swdepth-2`, `#hwdepth-1`, `#structure`, `#selftest`.
 
+### 5.3 타이밍 다이어그램의 행 고정 (📌)
+
+ISR 행 라벨 옆의 ⚐/📌, 컨트롤의 ISR 목록에 있는 📌 버튼, 또는 링크의 `#pin-ISR_A,ISR_B` 로 행을 고정합니다. 고정된 행은
+눈금자 바로 아래 띠에 복제되어 코어 평면을 위아래로 스크롤(shift+휠, 드래그, 방향키)해도 항상 보이므로, 기준 ISR 과 멀리
+아래에 있는 행을 나란히 비교할 수 있습니다. 고정 상태는 프로파일별로 브라우저에 기억됩니다.
+
 ## 6. 새 펌웨어 트리에 포팅하는 순서
 
 1. `python -m isrprof new <name> --from nr_modem` 으로 복제한 뒤 `build.yaml`의 `root`/`sources`를 실제 트리로 바꿉니다. 가능하면 CMake에 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`을 주어 `compile_commands.json`을 연결합니다.
@@ -341,6 +354,10 @@ python tools/verify_viewer.py output/<name>/profile.html    # 헤드리스 Edge/
 python tools/stress.py --programs 30 --viewers 6 --deep clang --out stress_out   # 랜덤 C/C++ 트리 생성 -> 분석 -> HTML -> 뷰어 self-test
 python tools/stress.py --programs 8 --viewers 2 --deep both                      # + zig 로 실제 ARM 컴파일 후 ELF 리더로 읽기
 ```
+
+`verify_viewer.py` 의 self-test 는 마지막에 **컨트롤 전수 스윕**을 수행합니다: 모든 창을 닫았다 열고, 모든 체크박스(코어·ISR·기준선·데드라인·콜그래프 고정)를
+껐다 켜고, 숫자 입력과 슬라이더를 최소·최대·중간값까지, 셀렉트의 모든 옵션과 모든 버튼을 눌러 보며, 각각이 실제로 화면(그려진 마크, 각 창의 DOM,
+카메라/스크롤 상태, 선택)을 바꾸고 원래대로 돌아오는지 `sweep:<종류>:<컨트롤>` 단계로 보고합니다. `tools/stress.py` 의 뷰어 검증도 같은 스윕을 포함합니다.
 
 새 환경에 포팅한 뒤에는 위 순서대로 한 번 돌려 보십시오. `stress.py` 는 코어/ISR/HW 블록/클래스·가상 함수·템플릿·람다·함수 포인터
 테이블·접근 매크로·IPC 가 섞인 C/C++ 트리를 무작위로 만들어 전체 파이프라인과 뷰어를 검증하고 `stress_report.json` 을 남깁니다.

@@ -117,6 +117,11 @@ and pipeline→control upward calls, heap allocation in ISR paths, two deadline 
 
 Time expressions: `"1.2 symbol"`, `"0.5 slot"`, `"-30 us"`, `"2 ms"`, `"1 subframe"` (bare numbers = symbols).
 
+**Pinned rows.** Any ISR row can be pinned (📌 next to the row label, or the 📌 button in the ISR list of the
+controls, or `#pin-ISR_A,ISR_B` in the link). Pinned rows are repeated in a band right under the ruler that stays on
+top while the core planes scroll (shift+wheel / drag / arrow keys), so a reference ISR can be compared with any row far
+below it. Pins are remembered per profile in the browser.
+
 ### Viewer options (`profile.yaml: viewer`)
 
 `default_view` (aligned / tilt / 3d), `tilt_dx_px`, `theme`, `unit`, `row_px`, `label_margin_px`,
@@ -138,8 +143,8 @@ of the token parser alone — toggle it per profile or per run, and limit it to 
 | `deep.scope` / `exclude` | globs relative to `build.root` or SW node ids: only those translation units are analysed deeply (speed on big trees), everything else stays on the token parser |
 | `deep.target`, `std_c`, `std_cxx`, `sysroot`, `extra_args` | cross flags; without a sysroot the bundled freestanding headers (`stdint.h`, `<new>` …) keep the parse going |
 | `deep.jobs`, `deep.cache` | parallel translation units; per-TU cache under `output/<name>/.cache/deep` (mtime + flags) so re-runs only re-analyse what changed |
-| `deep.build.run`, `objects` | objects backend: run the project build first; which object files to read (`build/**/*.o` by default) |
-| `deep.build.compile` (`auto` / `zig` / `off`), `zig_target`, `mcpu`, `zig_args` | compile the translation units here when no objects exist (`auto`) or always (`zig`): `deep.target` is mapped to the zig triple (`arm-none-eabi` → `arm-freestanding-eabi`, `-mcpu=cortex_m4` default for ARM), compile_commands flags are reused, `-O0 -fno-inline` keeps the object graph equal to the source graph; objects are cached under `output/<name>/.cache/obj` by source mtime + flags |
+| `deep.build.run`, `dir`, `cwd`, `objects` | objects backend: run the project build first (`cmake.configure` + `build_command`, executed in `cwd`, default `build.root`); `dir` is the build folder whose objects are read (default `cmake.build_dir`, else `<root>/build`; `objects` globs override it, e.g. an out-of-tree `C:/work/build_arm/**/*.o`) |
+| `deep.build.compile` (`auto` / `zig` / `off`), `obj_dir`, `zig_target`, `mcpu`, `zig_args` | compile the translation units here when no objects exist (`auto`) or always (`zig`): `deep.target` is mapped to the zig triple (`arm-none-eabi` → `arm-freestanding-eabi`, `-mcpu=cortex_m4` default for ARM), compile_commands flags are reused, `-O0 -fno-inline` keeps the object graph equal to the source graph; objects are cached under `output/<name>/.cache/obj` (or `obj_dir`) by source mtime + flags |
 | `deep.build.reader` (`elf` / `binutils`), `toolchain_prefix`, `nm`, `objdump` | `elf` (default) needs no tools; `binutils` parses the toolchain's `nm -C` / `objdump -dr -C` text instead (COFF / Mach-O objects) |
 
 What the clang backend adds over the token parser: C++ methods with qualified names, constructors / destructors,
@@ -193,9 +198,15 @@ python tools/stress.py --programs 8 --viewers 2 --deep both     # same, plus a r
 ```
 
 `verify_viewer.py` opens the page with `#selftest`: the built-in self-test selects ISR roots, nested boxes,
-HW blocks and SW nodes, switches focus modes, levels, depths, views, time ranges, cores, ISR filters, units
-and tabs, and reports per-step results, timings and JS errors; the script checks that every interaction had
+HW blocks and SW nodes, switches focus modes, levels, depths, views, time ranges, cores, ISR filters, units,
+pinned rows and tabs, and reports per-step results, timings and JS errors; the script checks that every interaction had
 the expected effect (works from any shell; the Chromium child-process variables inherited from VS Code are stripped).
+It ends with the **control sweep**: every window is closed and reopened, every checkbox (cores, ISRs, reference
+lines, deadlines, call-graph pin) is toggled off and on, every number input and slider is driven to its minimum,
+maximum and middle, every select option and every button is exercised; each one must change what is drawn
+(a signature of the marks, the DOM of every window, the camera / scroll state and the selection) and come back
+when restored. Steps are reported as `sweep:<kind>:<control>`, with the differing signature keys when something
+did not recover.
 
 `stress.py` is the monkey / random test: each run generates firmware trees with random cores, ISRs, HW blocks, namespaces,
 classes with virtual stages, templates, lambdas, singletons, function-pointer tables, access macros, IPC and shared globals,

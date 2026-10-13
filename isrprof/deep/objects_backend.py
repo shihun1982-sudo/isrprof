@@ -177,35 +177,43 @@ def analyze(cfg) -> SymbolGraph:
     t0 = time.perf_counter()
     cache = os.path.join(cfg.output["dir"], ".cache")
     os.makedirs(cache, exist_ok=True)
+    cm = cfg.build.get("cmake") or {}
+    # the build folder: deep.build.dir (default cmake.build_dir, else <root>/build) holds the project's objects;
+    # deep.build.cwd (default root) is where the configure / build commands run
+    def under_root(p):
+        return p if os.path.isabs(p) else os.path.normpath(os.path.join(root, p))
+    build_dir = under_root(str(bcfg.get("dir") or cm.get("build_dir") or "build"))
+    build_cwd = under_root(str(bcfg.get("cwd") or "."))
+    g.stats["build_dir"] = build_dir
     # 1. the project's own build
     if bcfg.get("run"):
         cmds = []
-        cm = cfg.build.get("cmake") or {}
         if cm and cm.get("configure"):
             cmds.append(cm["configure"])
         if cfg.build.get("build_command"):
             cmds.append(cfg.build["build_command"])
+        os.makedirs(build_cwd, exist_ok=True)
         with open(os.path.join(cache, "build.log"), "w", encoding="utf-8", errors="replace") as logf:
             for cmd in cmds:
-                g.log.append(f"build: {cmd}")
+                g.log.append(f"build ({build_cwd}): {cmd}")
                 try:
-                    r = subprocess.run(cmd, shell=True, cwd=root, capture_output=True, text=True, timeout=int(bcfg.get("timeout", 3600)))
+                    r = subprocess.run(cmd, shell=True, cwd=build_cwd, capture_output=True, text=True, timeout=int(bcfg.get("timeout", 3600)))
                     logf.write(f"$ {cmd}\n{r.stdout}\n{r.stderr}\n")
                     if r.returncode != 0:
                         g.log.append(f"build command failed ({r.returncode}); see .cache/build.log")
                 except Exception as e:
                     g.log.append(f"build command error: {e}")
     # 2. the object files: the project's, or compiled here with zig
-    pats = bcfg.get("objects") or ["build/**/*.o", "build/**/*.obj"]
+    pats = bcfg.get("objects") or ["**/*.o", "**/*.obj"]
     objs: list[str] = []
     for p in pats:
-        full = p if os.path.isabs(p) else os.path.join(root, p)
+        full = p if os.path.isabs(p) else os.path.join(build_dir if not bcfg.get("objects") else root, p)
         objs += sorted(glob.glob(full, recursive=True))
     objs = [o for o in objs if in_scope(cfg, o)]
     tu_of: dict[str, str] = {}
     compile_mode = str(bcfg.get("compile", "auto"))
     if (not objs and compile_mode in ("auto", "zig")) or compile_mode == "zig":
-        objs = compile_with_zig(cfg, g, os.path.join(cache, "obj"))
+        objs = compile_with_zig(cfg, g, under_root(str(bcfg["obj_dir"])) if bcfg.get("obj_dir") else os.path.join(cache, "obj"))
         for tu in translation_units(cfg):
             base = os.path.splitext(os.path.basename(tu))[0] + "."
             for o in objs:
