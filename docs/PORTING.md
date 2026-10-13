@@ -11,14 +11,15 @@
 |---|---|
 | Python | 3.10 이상 (`X \| None` 타입 힌트 사용) |
 | 필수 패키지 | `pyyaml>=6.0` |
-| 선택 패키지 | `esprima` (뷰어 JS 문법 검사), `anthropic` (LLM 보조 기능을 켤 때만) |
+| 선택 패키지 | `libclang` (deep 분석 clang 백엔드), `ziglang` (deep 분석 objects 백엔드의 크로스 컴파일), `esprima` (뷰어 JS 문법 검사), `anthropic` (LLM 보조 기능을 켤 때만) |
 | 브라우저 | 뷰어는 아무 최신 브라우저로 열면 됨(오프라인 동작, three.js 내장). 자동 검증·스크린샷에는 Edge 또는 Chrome 필요 |
 | OS | Windows / Linux / macOS 모두 가능 (검증 도구는 어떤 셸에서든 동작) |
-| 빌드 도구 | 불필요. CMake는 `compile_commands.json`을 만들 때만 쓰며, isrprof는 아무 빌드도 실행하지 않음 |
+| 빌드 도구 | 불필요. CMake는 `compile_commands.json`을 만들 때만 쓰임. deep 분석의 objects 백엔드는 `deep.build.run: true` 일 때만 프로젝트 빌드를 실행하고, 그 외에는 pip 의 zig 로 직접 컴파일 |
 
 ```bash
 pip install pyyaml            # 필수
 pip install esprima           # 선택: python tools/check_js.py
+pip install libclang ziglang  # 선택: deep 분석 (clang 프런트엔드 / 실제 크로스 컴파일 + ELF 리더)
 ```
 
 ## 2. 복사할 파일
@@ -97,7 +98,8 @@ profiles/<name>/
 deep:
   enabled: true              # 끄면 토큰 파서만 사용 (실행 시 --deep / --no-deep 로도 전환)
   backend: clang             # clang: libclang + compile_commands 플래그 + 크로스 타깃 (바이너리 생성 없음, Windows에서 ARM 트리 분석 가능)
-                             # objects: 실제 빌드(.o)를 toolchain nm / objdump 로 읽음 (툴체인 설치 필요)   both: 둘 다
+                             # objects: 실제 오브젝트(.o)를 읽음. 프로젝트 빌드 산출물이 없으면 zig(clang)로 이 PC에서 직접 크로스 컴파일 (pip install ziglang)
+                             # both: clang + objects (프런트엔드의 메서드·override·읽기/쓰기 + 오브젝트의 실제 링크 간선)
   scope: ["dl/**", "ul_core"]   # 깊게 분석할 범위: root 기준 glob 또는 SW 노드 id. 비우면 전체 TU. 큰 트리는 작업 중인 모듈만
   exclude: []
   target: arm-none-eabi      # clang --target
@@ -109,10 +111,21 @@ deep:
   cache: true                # TU별 캐시 (output/<name>/.cache/deep) - 재실행 시 바뀐 파일만
   max_files: 0
   build:                     # objects 백엔드
-    run: false               # cmake.configure + build_command 를 먼저 실행할지
-    objects: ["build/**/*.o"]
-    toolchain_prefix: arm-none-eabi-
+    run: false               # cmake.configure + build_command 를 먼저 실행할지 (프로젝트 툴체인이 있는 PC)
+    objects: ["build/**/*.o"]  # 읽을 오브젝트. 없으면 아래 compile 로 직접 만듦
+    compile: auto            # auto: 오브젝트가 없을 때만 zig 로 컴파일 | zig: 항상 | off: 안 함
+    zig_target: null         # 비우면 deep.target 을 변환 (arm-none-eabi -> arm-freestanding-eabi, aarch64-none-elf -> aarch64-freestanding-none ...)
+    mcpu: cortex_m4          # ARM 기본값. 실제 코어에 맞게 (cortex_a53, cortex_r5 ...)
+    zig_args: []             # 추가 컴파일 플래그
+    reader: elf              # elf: 내장 ELF 리더 (도구 불필요) | binutils: toolchain nm / objdump 텍스트 파싱 (COFF, Mach-O)
+    toolchain_prefix: arm-none-eabi-   # reader: binutils 일 때만
 ```
+
+**objects 백엔드가 하는 일** — 각 번역 단위를 compile_commands 플래그 + `-O0 -fno-inline` 으로 컴파일해 `output/<name>/.cache/obj` 에
+두고(소스 mtime·플래그로 캐시), ELF 심볼·재배치 테이블에서 함수/데이터 심볼, 호출 재배치(`bl`/`b.w`/`call`), 주소가 취해진 함수(함수 포인터·
+테이블·vtable), 데이터 참조를 읽어 이름을 디맹글합니다. 같은 섹션의 static 함수 호출은 어셈블러가 재배치 없이 해결하므로 Thumb/ARM/AArch64/x86
+명령을 직접 디코드해 보충합니다. 레지스터·변수의 읽기/쓰기 방향과 가상 호출 대상은 오브젝트에 남지 않으므로, 가장 완전한 설정은 `backend: both` 입니다.
+Windows 32/64-bit 모두 Python + `pip install ziglang` 만으로 ARM 트리를 실제로 컴파일합니다(툴체인 설치 불필요).
 
 결과 JSON의 `deep` 섹션에 백엔드·TU 수·정제/추가된 함수 수·캐시 적중·경고가 기록되고, 함수 테이블의 `precise`,
 `kind`(function/method/ctor/dtor/template), `cls`, `virtual`, `overrides`, 호출의 `kind`(direct/member/virtual/indirect/ctor)와
@@ -317,7 +330,20 @@ output/<name>/
 - **Remove**: 제거 시 깨지는 호출자, 어떤 ISR에서도 도달 불가가 되는 함수, 유일한 writer/reader를 잃는 변수, 더는 접근되지 않는 레지스터, ISR 소요 시간 변화(budget 대비).
 - **Move to ISR**: 대상 ISR과 위치(처음/끝)를 고르면 서브트리의 레지스터 접근을 새 시각으로 옮겨 데드라인을 다시 검사하고, 공유 변수의 갱신 순서(이 함수의 접근 vs 다른 함수의 접근)가 바뀌는 쌍에 ⚠, 코어가 바뀌어 cross-core가 되는 변수, 대상 ISR budget을 보여줍니다.
 
-## 7. 알아둘 제약
+## 7. 검증 도구
+
+```bash
+python -m unittest discover -s tests          # 39개 테스트: 파이프라인, 프로파일, 파서, C/C++ 코퍼스+랜덤 프로그램, ELF 리더/objects 백엔드(zig 설치 시)
+python tools/check_js.py                      # 뷰어 JS 문법
+python tools/verify_viewer.py output/<name>/profile.html    # 헤드리스 Edge/Chrome 으로 40단계 self-test (창마다 실제 반응 확인)
+python tools/stress.py --programs 30 --viewers 6 --deep clang --out stress_out   # 랜덤 C/C++ 트리 생성 -> 분석 -> HTML -> 뷰어 self-test
+python tools/stress.py --programs 8 --viewers 2 --deep both                      # + zig 로 실제 ARM 컴파일 후 ELF 리더로 읽기
+```
+
+새 환경에 포팅한 뒤에는 위 순서대로 한 번 돌려 보십시오. `stress.py` 는 코어/ISR/HW 블록/클래스·가상 함수·템플릿·람다·함수 포인터
+테이블·접근 매크로·IPC 가 섞인 C/C++ 트리를 무작위로 만들어 전체 파이프라인과 뷰어를 검증하고 `stress_report.json` 을 남깁니다.
+
+## 8. 알아둘 제약
 
 - 내장 파서는 전처리를 하지 않는 토큰 파서입니다. `#if`로 꺼진 코드도 파싱되고, 매크로로 생성되는 함수는 `ISR_ENTRY(name)` 같은 **대문자 매크로(이름) { ... }** 형태만 인식합니다. 전처리가 꼭 필요하면 `parser.backend: libclang` 플러그인을 붙이십시오.
 - 지역 변수는 매개변수와 `타입 이름 [= ...];` 꼴의 선언을 수집해 전역 접근에서 제외합니다. 매크로로 선언되는 지역 변수처럼 이 꼴을 벗어나면 전역과 같은 이름일 때 오탐이 생길 수 있습니다 (`touch.ignore_vars`로 제외 가능).

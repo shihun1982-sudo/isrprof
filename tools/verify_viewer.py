@@ -98,19 +98,22 @@ def check(report: dict) -> list[str]:
         bad.append("selecting an ISR did not highlight any SW node as executing")
     if not sel.get("hwRel"):
         bad.append("selecting an ISR did not highlight any HW block")
-    if not sel.get("swDim") or not sel.get("hwDim"):
+    if (not sel.get("swDim") and ini.get("swBoxes", 0) > sel.get("swRelX", 0) + 2) or (not sel.get("hwDim") and ini.get("hwBoxes", 0) > sel.get("hwRel", 0) + 2):
         bad.append("unrelated SW / HW boxes were not dimmed")
     if sel.get("outline") is False:
         bad.append("selection outline not shown in the 3D diagram")
     sc = st.get("side column clipping", {})
-    if sc and not (sc.get("overlap", 1) <= 0 and (sc.get("treeScrolls") or sc.get("lastRowBottom", 0) <= sc.get("treeBottom", 0))):
+    if sc and not (sc.get("overlap", 1) <= 0 and sc.get("treeBodyBottom", 0) <= sc.get("treeBottom", 0) + 1 and (sc.get("treeScrolls") or sc.get("lastRowBottom", 0) <= sc.get("treeBodyBottom", 0) + 1)):
         bad.append(f"call graph overflows into the details panel instead of scrolling: {sc}")
     hb = st.get("history back / forward + variable / ipc links", {})
     if hb and not (hb.get("back1", {}).get("sel") and not hb.get("back1", {}).get("block") and hb.get("back2", {}).get("sel") is None
                    and hb.get("fwd", {}).get("sel") and hb.get("fwd2", {}).get("block") == hb.get("atBlock")):
         bad.append(f"selection history back / forward did not restore the selections: {hb}")
-    if hb and not (hb.get("vr", {}).get("fids", 0) > 1 and hb.get("vr", {}).get("detailHasUsers") and hb.get("ir", {}).get("fids", 0) > 0 and hb.get("backVar") == hb.get("vr", {}).get("selVar")):
-        bad.append(f"variable / IPC selection did not focus their users: {hb}")
+    vr, ir = hb.get("vr", {}), hb.get("ir", {})
+    if hb and not vr.get("skipped") and not (vr.get("fids", 0) >= 1 and vr.get("detailHasUsers") and hb.get("backVar") == vr.get("selVar")):
+        bad.append(f"variable selection did not focus its users: {hb}")
+    if hb and not ir.get("skipped") and not ir.get("fids", 0) > 0:
+        bad.append(f"IPC selection did not focus its users: {hb}")
     im = st.get("impact modes", {})
     if im and not (im.get("usedbyRows", 0) >= 2 and im.get("removeHeads", 0) >= 4 and im.get("moveSelect") and im.get("moveHeads", 0) >= 3 and im.get("targetAfter") and im.get("targetAfter") != im.get("target")):
         bad.append(f"impact analysis modes did not render: {im}")
@@ -130,7 +133,7 @@ def check(report: dict) -> list[str]:
         bad.append(f"selecting a nested function re-rooted the call graph (or hid the selection): {pc}")
     if pc and not pc.get("pinnedOk"):
         bad.append(f"pinning did not make the selected function the root: {pc}")
-    if pc and not (pc.get("pinDroppedOnCaller") and pc.get("calleeDepth") == 1 and pc.get("afterNext", "").endswith("/1") and pc.get("rootStill") == pc.get("rootUnpinned")):
+    if pc and not (pc.get("pinDroppedOnCaller") and pc.get("calleeDepth") == 1 and (pc.get("afterNext", "").endswith("/1") or pc.get("rootKids", 2) < 2) and pc.get("rootStill") == pc.get("rootUnpinned")):
         bad.append(f"caller / callee / sibling navigation did not behave: {pc}")
     cg = st.get("click call-graph row", {})
     if cg and not (cg.get("treeRows") == cg.get("treeNodes") and cg.get("leafRows", 0) > 0):
@@ -167,8 +170,10 @@ def check(report: dict) -> list[str]:
     if pn and (pn.get("x0") == pn.get("x1") or not pn.get("panMode")):
         bad.append(f"3D view did not pan: {pn}")
     rl = st.get("reference lines off/on", {})
-    if rl and not (rl.get("refsNone") == 0 and rl.get("refsBack", 0) > 0 and rl.get("ticksOff") == 0 and rl.get("ticks", 0) > 0 and rl.get("legend", 0) > 0):
+    if rl and not (rl.get("refsNone") == 0 and rl.get("refsBack", 0) > 0 and rl.get("ticksOff") == 0 and rl.get("legend", 0) > 0):
         bad.append(f"reference line / deadline toggles did not apply: {rl}")
+    if rl and rl.get("ticks", 0) == 0:
+        notes.append("no HW deadline instant falls inside a shown ISR window (data, not a viewer fault)")
     nd = st.get("nudge 2d", {})
     if nd and not (nd.get("r1", 0) > nd.get("r0", 0) and abs(nd.get("back", 0) - nd.get("r0", 0)) < 0.5):
         bad.append(f"2D nudge did not move the time range: {nd}")

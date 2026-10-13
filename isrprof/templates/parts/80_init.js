@@ -249,15 +249,18 @@ function selfTest() {
   step('initial', () => ({ stats: stats(), swBoxes: document.querySelectorAll('#sw .nd').length, hwBoxes: document.querySelectorAll('#hw .nd').length, swEdges: document.querySelectorAll('#sw .ed').length, hwEdges: document.querySelectorAll('#hw .ed').length, channels: G.chRecs ? G.chRecs.length : 0, treeRows: document.querySelectorAll('#tree-body .row').length }));
   const isr = P.isrs.find(i => i.hw_events.length) || P.isrs[0];
   step('select ISR root ' + isr.name, () => { selectNode(isr.name + '#' + shownInst(isr).k, isr.tree.fid); return { fids: REL.fids.size, blocks: REL.blocks.size, swNodes: [...REL.sw.values()].filter(t => t.rw !== 'c').length, vars: REL.vars.size, swRelX: swCount('rel-x'), swRelRW: swCount('rel-r') + swCount('rel-w') + swCount('rel-rw'), swDim: swCount('dim'), hwRel: hwCount('rel-r') + hwCount('rel-w') + hwCount('rel-rw') + hwCount('rel-miss'), hwDim: hwCount('dim'), treeRows: document.querySelectorAll('#tree-body .row').length, detailTables: document.querySelectorAll('#detail-body table').length, outline: G.selOutline ? G.selOutline.visible : null, focusInfo: document.getElementById('focus-info').textContent }; });
-  step('side column clipping', () => { setLevel(30); const tp = document.getElementById('tree-panel').getBoundingClientRect(), dp = document.getElementById('detail-panel').getBoundingClientRect(), tb = document.getElementById('tree'), last = [...document.querySelectorAll('#tree-body .row')].pop().getBoundingClientRect(); setLevel(2); return { treeBottom: Math.round(tp.bottom), detailTop: Math.round(dp.top), overlap: Math.round(tp.bottom - dp.top), lastRowBottom: Math.round(last.bottom), treeScrolls: tb.scrollHeight > tb.clientHeight, treeClientH: tb.clientHeight }; });
+  step('side column clipping', () => { setLevel(30); const tp = document.getElementById('tree-panel').getBoundingClientRect(), dp = document.getElementById('detail-panel').getBoundingClientRect(), tb = document.getElementById('tree'), last = [...document.querySelectorAll('#tree-body .row')].pop().getBoundingClientRect(); const r = { treeBottom: Math.round(tp.bottom), detailTop: Math.round(dp.top), overlap: Math.round(tp.bottom - dp.top), lastRowBottom: Math.round(last.bottom), treeScrolls: tb.scrollHeight > tb.clientHeight, treeClientH: tb.clientHeight, treeScrollH: tb.scrollHeight, treeBodyBottom: Math.round(tb.getBoundingClientRect().bottom), rows: document.querySelectorAll('#tree-body .row').length }; setLevel(2); return r; });
   step('history back / forward + variable / ipc links', () => {
     clearFocus(); const root = isr.name + '#' + shownInst(isr).k; selectNode(root, isr.tree.fid);
     const blk = BLOCKS.find(b => b.accessors.length); selectBlock(blk.id); const atBlock = S.block;
     histBack(); const back1 = { sel: S.selFid, block: S.block }; histBack(); const back2 = { sel: S.selFid, block: S.block }; histForward(); const fwd = { sel: S.selFid }; histForward(); const fwd2 = { block: S.block };
-    const v = P.memory.variables.find(x => x.accessors.length > 1); selectVariable(v.key);
-    const vr = { selVar: S.selVar, fids: REL ? REL.fids.size : 0, detailHasUsers: document.querySelectorAll('#detail-body table tr').length > 1, swSel: document.querySelectorAll('#sw .nd.sel').length };
-    const ch = P.memory.ipc_ops[0].channel; selectIpc(ch); const ir = { selIpc: S.selIpc, fids: REL ? REL.fids.size : 0 };
-    histBack(); const backVar = S.selVar; selectNode(root, isr.tree.fid);          // leave the ISR root selected for the following steps
+    const v = P.memory.variables.find(x => x.accessors.length > 1) || P.memory.variables[0];
+    let vr = { skipped: true }, backVar = null;
+    if (v) { selectVariable(v.key); vr = { selVar: S.selVar, fids: REL ? REL.fids.size : 0, detailHasUsers: document.querySelectorAll('#detail-body table tr').length > 1, swSel: document.querySelectorAll('#sw .nd.sel').length }; }
+    let ir = { skipped: true };
+    if (P.memory.ipc_ops.length) { selectIpc(P.memory.ipc_ops[0].channel); ir = { selIpc: S.selIpc, fids: REL ? REL.fids.size : 0 }; histBack(); backVar = S.selVar; }
+    else if (v) backVar = S.selVar;
+    selectNode(root, isr.tree.fid);          // leave the ISR root selected for the following steps
     return { atBlock, back1, back2, fwd, fwd2, vr, ir, backVar, buttons: !!document.getElementById('hist-back') }; });
   step('impact modes', () => {
     const withCallers = Object.keys(F).find(f => (IX.callers[f] || []).length && isrOfFn(f).length) || isr.tree.fid;
@@ -297,7 +300,7 @@ function selfTest() {
     r.rootPinned = first(); r.pinnedOk = r.rootPinned === deep.n.fid;
     document.getElementById('nav-caller').click(); r.afterCaller = S.selPath; r.pinDroppedOnCaller = S.pinPath === null;
     selectNode(root, isr.tree.fid); document.getElementById('nav-callee').click(); r.afterCallee = S.selPath; r.calleeDepth = S.selPath.split('/').length - 1;
-    document.getElementById('nav-next').click(); r.afterNext = S.selPath; r.rootStill = first();
+    document.getElementById('nav-next').click(); r.afterNext = S.selPath; r.rootStill = first(); r.rootKids = (isr.tree.children || []).length;
     clearFocus(); return r; });
   step('toggle expand on a box with callees', () => { const p = isr.name + '#' + shownInst(isr).k + withKids.key.slice(isr.name.length); selectNode(p, withKids.n.fid); const before = stats().boxes, wasOpen = isExp(p); toggleExp(p); renderAll(); const after = stats().boxes; toggleExp(p); renderAll(); return { node: withKids.n.name, wasOpen, boxesBefore: before, boxesAfter: after, boxesRestored: stats().boxes }; });
   step('sw depth 1', () => { setSwDepth(1); return { swBoxes: document.querySelectorAll('#sw .nd').length }; });
@@ -317,7 +320,7 @@ function selfTest() {
   step('view tilt', () => { setView('tilt'); return stats(); });
   step('reference lines off/on', () => { const all = TI.filter(t => t.id !== 'nw').map(t => t.id); const n0 = stats().refs, d0 = stats().deadlineTicks; setRefs(all); const n1 = stats().refs; setRefs([]); document.getElementById('dl-toggle').checked = false; document.getElementById('dl-toggle').dispatchEvent(new Event('change')); const d1 = stats().deadlineTicks; document.getElementById('dl-toggle').checked = true; document.getElementById('dl-toggle').dispatchEvent(new Event('change')); return { refsAll: n0, refsNone: n1, refsBack: stats().refs, ticks: d0, ticksOff: d1, legend: document.querySelectorAll('#legend .dash').length }; });
   step('nudge 2d', () => { applyRange({ start: 0, end: 2 * SLOT }); const r0 = R0(); setView('right'); const r1 = R0(); setView('left'); const back = R0(); applyRange(null); return { r0: +r0.toFixed(1), r1: +r1.toFixed(1), back: +back.toFixed(1) }; });
-  step('core off/on', () => { const cb = ct.querySelector('input'); cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); const a = stats().boxes; cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); return { boxesWithCoreOff: a, boxesAll: stats().boxes, checked: S.cores.size }; });
+  step('core off/on', () => { const cb = ct.querySelector('input[data-core="' + isr.core + '"]') || ct.querySelector('input'); cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); const a = stats().boxes; cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); return { boxesWithCoreOff: a, boxesAll: stats().boxes, checked: S.cores.size }; });
   step('isr filter', () => { setIsrs([isr.name]); const a = stats().boxes, lbl = isrSummary.textContent; setIsrs([]); const none = stats().boxes; setIsrs(null); return { boxesOne: a, boxesNone: none, boxesAll: stats().boxes, summary: lbl }; });
   step('slots 2 from 1', () => { setSlots(1, 2); return { boxes: stats().boxes, from: slotFrom.value, count: slotCount.value, range: document.getElementById('range-info').textContent }; });
   step('slots next', () => { document.getElementById('slot-next').click(); return { from: slotFrom.value, count: slotCount.value, max: slotMax }; });

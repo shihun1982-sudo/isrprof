@@ -125,11 +125,13 @@ of the token parser alone — toggle it per profile or per run, and limit it to 
 
 | key | meaning |
 |---|---|
-| `deep.backend` | `clang` — libclang (`pip install libclang`, DLL included) parses every translation unit with its real `-D` / `-I` / `-std` flags from `compile_commands.json` and a cross target (`--target=arm-none-eabi`); nothing is compiled to a binary, so an ARM tree is analysed on a Windows PC. `objects` — the real build: optionally runs `cmake.configure` / `build_command`, then reads the `.o` files with the toolchain's `nm` / `objdump` (relocations = calls and data references). `both` merges them. |
+| `deep.backend` | `clang` — libclang (`pip install libclang`, DLL included) parses every translation unit with its real `-D` / `-I` / `-std` flags from `compile_commands.json` and a cross target (`--target=arm-none-eabi`); nothing is compiled to a binary, so an ARM tree is analysed on a Windows PC. `objects` — the real build: the `.o` files of the project (after `deep.build.run` ran `cmake.configure` / `build_command`), or, when there are none, every translation unit **cross-compiled on the analysis PC with the bundled zig/clang** (`pip install ziglang`, no toolchain install, Windows 32/64-bit), read with the pure-Python ELF reader (symbols, call / branch relocations, address-taken functions, data references; assembler-resolved calls to static functions are decoded from the Thumb / ARM / AArch64 / x86 instructions). `both` merges them: methods, overrides and read / write direction from the frontend, linked edges confirmed and completed by the objects. |
 | `deep.scope` / `exclude` | globs relative to `build.root` or SW node ids: only those translation units are analysed deeply (speed on big trees), everything else stays on the token parser |
 | `deep.target`, `std_c`, `std_cxx`, `sysroot`, `extra_args` | cross flags; without a sysroot the bundled freestanding headers (`stdint.h`, `<new>` …) keep the parse going |
 | `deep.jobs`, `deep.cache` | parallel translation units; per-TU cache under `output/<name>/.cache/deep` (mtime + flags) so re-runs only re-analyse what changed |
-| `deep.build.run`, `objects`, `toolchain_prefix`, `nm`, `objdump` | objects backend: build first, which object files, which tools |
+| `deep.build.run`, `objects` | objects backend: run the project build first; which object files to read (`build/**/*.o` by default) |
+| `deep.build.compile` (`auto` / `zig` / `off`), `zig_target`, `mcpu`, `zig_args` | compile the translation units here when no objects exist (`auto`) or always (`zig`): `deep.target` is mapped to the zig triple (`arm-none-eabi` → `arm-freestanding-eabi`, `-mcpu=cortex_m4` default for ARM), compile_commands flags are reused, `-O0 -fno-inline` keeps the object graph equal to the source graph; objects are cached under `output/<name>/.cache/obj` by source mtime + flags |
+| `deep.build.reader` (`elf` / `binutils`), `toolchain_prefix`, `nm`, `objdump` | `elf` (default) needs no tools; `binutils` parses the toolchain's `nm -C` / `objdump -dr -C` text instead (COFF / Mach-O objects) |
 
 What the clang backend adds over the token parser: C++ methods with qualified names, constructors / destructors,
 templates and lambdas, **virtual calls with their override set as candidates**, calls through function pointers
@@ -177,12 +179,25 @@ python tools/check_js.py                         # viewer JS syntax (pip install
 python tools/verify_viewer.py output/nr_modem/profile.html      # drives the page in headless Edge / Chrome
 python tools/screenshot.py output/nr_modem/profile.html shot.png --hash sel-DL_PDSCH_ISR
 python tools/gen_scale.py 40 --out /tmp/scale40  # synthetic big tree for benchmarks
+python tools/stress.py --programs 30 --viewers 6 --deep clang   # random C/C++ firmware trees -> pipeline -> HTML -> browser self-test
+python tools/stress.py --programs 8 --viewers 2 --deep both     # same, plus a real ARM cross-compile with zig and the ELF reader
 ```
 
 `verify_viewer.py` opens the page with `#selftest`: the built-in self-test selects ISR roots, nested boxes,
 HW blocks and SW nodes, switches focus modes, levels, depths, views, time ranges, cores, ISR filters, units
 and tabs, and reports per-step results, timings and JS errors; the script checks that every interaction had
 the expected effect (works from any shell; the Chromium child-process variables inherited from VS Code are stripped).
+
+`stress.py` is the monkey / random test: each run generates firmware trees with random cores, ISRs, HW blocks, namespaces,
+classes with virtual stages, templates, lambdas, singletons, function-pointer tables, access macros, IPC and shared globals,
+mixed C and C++ files, runs the whole pipeline (token parser, and the deep backends when `libclang` / `ziglang` are
+installed), writes the HTML and JSON, checks structural invariants (every ISR has a tree, every call target and SW-node
+function resolves, HW events name known blocks, deep statistics present) and drives a sample of the viewers through the
+40-step browser self-test. `--out DIR` keeps the trees and a `stress_report.json`; `--seed` makes a run reproducible.
+The unit tests cover the same ground deterministically: `tests/test_cxx_corpus.py` (construct corpus + random programs with
+a known call graph, both parsers), `tests/test_deep_objects.py` (demangler, binutils text parsers, and — when `ziglang` is
+installed — a real ARM cross-compile of the C++ sample read back through the ELF reader, the objects backend end to end on
+Windows, and the clang + objects merge).
 
 ## Optional LLM assistance
 

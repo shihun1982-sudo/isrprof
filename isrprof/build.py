@@ -144,7 +144,7 @@ def resolve(base_dir: str, braw: dict | None, legacy_sources: list[str] | None =
         "jobs": int(draw.get("jobs", 0) or 0),
         "cache": bool(draw.get("cache", True)),
         "max_files": int(draw.get("max_files", 0) or 0),
-        "build": dict(draw.get("build") or {}),                  # objects backend: run, objects globs, toolchain_prefix, nm, objdump, timeout
+        "build": dict(draw.get("build") or {}),                  # objects backend: run, objects, compile (auto|zig|off), zig_target, mcpu, zig_args, reader (elf|binutils), toolchain_prefix, nm, objdump, timeout
     }
     parser = dict(braw.get("parser") or {})
     parser.setdefault("backend", "builtin")
@@ -168,5 +168,5 @@ def summary(build: dict) -> dict:
         "cmake": build["cmake"], "build_command": build["build_command"],
         "compile_commands": build["compile_commands"], "translation_units": build["translation_units"],
         "defines": build["defines"], "include_dirs": build["include_dirs"],
-        "deep": {k: v for k, v in build["deep"].items() if k != "build"} | {"build": {k: v for k, v in build["deep"]["build"].items() if k in ("run", "objects", "toolchain_prefix")}},
+        "deep": {k: v for k, v in build["deep"].items() if k != "build"} | {"build": {k: v for k, v in build["deep"]["build"].items() if k in ("run", "objects", "compile", "zig_target", "mcpu", "reader", "toolchain_prefix")}},
     }
